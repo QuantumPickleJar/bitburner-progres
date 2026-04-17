@@ -2,6 +2,12 @@ const HACK_WORKER = "/workers/hack-once.js";
 const GROW_WORKER = "/workers/grow-once.js";
 const WEAKEN_WORKER = "/workers/weaken-once.js";
 const HEARTBEAT_PORT = 1;
+const PREP_MONEY_TOLERANCE_RATIO = 0.999;
+const PREP_SECURITY_TOLERANCE = 0.05;
+const MIN_BATCH_AHEAD_MS = 200;
+const HACK_LAND_BUFFER_GAPS = 4;
+const MIN_START_BUFFER_MS = 5;
+let batchSequence = 0;
 
 /** @param {NS} ns */
 export async function main(ns) {
@@ -19,7 +25,7 @@ export async function main(ns) {
 
   const parsed = parseLegacyAwareArgs(ns.args);
   const reserveRamGb = parsed.reserveRamGb;
-  const instanceTag = parsed.instanceTag || `${target || "unknown"}@${ns.getHostname()}-${Date.now()}`;
+  const instanceTag = parsed.instanceTag || `${target || "unknown"}@${ns.getHostname()}-pid${ns.pid}`;
 
   if (!target) {
     ns.tprint("ERROR: Missing target hostname.");
@@ -81,10 +87,7 @@ export async function main(ns) {
 }
 
 async function prepTarget(ns, ctx) {
-  const toleranceMoney = 0.999;
-  const toleranceSec = 0.05;
-
-  while (ns.getServerSecurityLevel(ctx.target) > ns.getServerMinSecurityLevel(ctx.target) + toleranceSec) {
+  while (ns.getServerSecurityLevel(ctx.target) > ns.getServerMinSecurityLevel(ctx.target) + PREP_SECURITY_TOLERANCE) {
     const sec = ns.getServerSecurityLevel(ctx.target);
     const min = ns.getServerMinSecurityLevel(ctx.target);
     const weakenNeeded = Math.max(1, Math.ceil((sec - min) / ns.weakenAnalyze(1)));
@@ -103,14 +106,15 @@ async function prepTarget(ns, ctx) {
     publishThreadSnapshot(ns, ctx.host, ctx.target, ctx.instanceTag);
   }
 
-  while (ns.getServerMoneyAvailable(ctx.target) < ns.getServerMaxMoney(ctx.target) * toleranceMoney) {
+  while (ns.getServerMoneyAvailable(ctx.target) < ns.getServerMaxMoney(ctx.target) * PREP_MONEY_TOLERANCE_RATIO) {
     const maxMoney = Math.max(1, ns.getServerMaxMoney(ctx.target));
     const currentMoney = Math.max(1, ns.getServerMoneyAvailable(ctx.target));
     const growthMult = Math.max(1.000001, maxMoney / currentMoney);
     let growNeeded;
     try {
       growNeeded = Math.ceil(ns.growthAnalyze(ctx.target, growthMult));
-    } catch {
+    } catch (err) {
+      ns.print(`WARN growthAnalyze prep fallback: ${String(err)}`);
       growNeeded = 1;
     }
     if (!Number.isFinite(growNeeded) || growNeeded <= 0) {
@@ -131,7 +135,7 @@ async function prepTarget(ns, ctx) {
     publishThreadSnapshot(ns, ctx.host, ctx.target, ctx.instanceTag);
   }
 
-  while (ns.getServerSecurityLevel(ctx.target) > ns.getServerMinSecurityLevel(ctx.target) + toleranceSec) {
+  while (ns.getServerSecurityLevel(ctx.target) > ns.getServerMinSecurityLevel(ctx.target) + PREP_SECURITY_TOLERANCE) {
     const sec = ns.getServerSecurityLevel(ctx.target);
     const min = ns.getServerMinSecurityLevel(ctx.target);
     const weakenNeeded = Math.max(1, Math.ceil((sec - min) / ns.weakenAnalyze(1)));
@@ -171,7 +175,8 @@ function scheduleBatch(ns, cfg) {
     let growThreads;
     try {
       growThreads = Math.ceil(ns.growthAnalyze(cfg.target, 1 / (1 - hackedFrac)));
-    } catch {
+    } catch (err) {
+      ns.print(`WARN growthAnalyze batch fallback: ${String(err)}`);
       growThreads = 1;
     }
     if (!Number.isFinite(growThreads) || growThreads < 1) growThreads = 1;
@@ -195,13 +200,14 @@ function scheduleBatch(ns, cfg) {
 
 function launchTimedBatch(ns, cfg, plan) {
   const now = Date.now();
-  const batchId = `${cfg.instanceTag}:${now}`;
+  batchSequence += 1;
+  const batchId = `${cfg.instanceTag}:b${batchSequence}`;
 
   const hackTime = ns.getHackTime(cfg.target);
   const growTime = ns.getGrowTime(cfg.target);
   const weakenTime = ns.getWeakenTime(cfg.target);
 
-  const desiredHackLand = now + Math.max(200, cfg.gapMs * 4);
+  const desiredHackLand = now + Math.max(MIN_BATCH_AHEAD_MS, cfg.gapMs * HACK_LAND_BUFFER_GAPS);
   const desiredW1Land = desiredHackLand + cfg.gapMs;
   const desiredGrowLand = desiredHackLand + cfg.gapMs * 2;
   const desiredW2Land = desiredHackLand + cfg.gapMs * 3;
@@ -212,7 +218,7 @@ function launchTimedBatch(ns, cfg, plan) {
   let w2Start = desiredW2Land - weakenTime;
 
   const earliestStart = Math.min(hackStart, w1Start, growStart, w2Start);
-  const minAllowed = now + 5;
+  const minAllowed = now + MIN_START_BUFFER_MS;
   if (earliestStart < minAllowed) {
     const shift = minAllowed - earliestStart;
     hackStart += shift;
@@ -226,10 +232,17 @@ function launchTimedBatch(ns, cfg, plan) {
   const growDelay = Math.max(0, Math.round(growStart - now));
   const w2Delay = Math.max(0, Math.round(w2Start - now));
 
-  ns.exec(HACK_WORKER, cfg.host, plan.hackThreads, cfg.target, hackDelay, cfg.instanceTag, batchId, "H");
-  ns.exec(WEAKEN_WORKER, cfg.host, plan.w1Threads, cfg.target, w1Delay, cfg.instanceTag, batchId, "W1");
-  ns.exec(GROW_WORKER, cfg.host, plan.growThreads, cfg.target, growDelay, cfg.instanceTag, batchId, "G");
-  ns.exec(WEAKEN_WORKER, cfg.host, plan.w2Threads, cfg.target, w2Delay, cfg.instanceTag, batchId, "W2");
+  const hackPid = ns.exec(HACK_WORKER, cfg.host, plan.hackThreads, cfg.target, hackDelay, cfg.instanceTag, batchId, "H");
+  const w1Pid = ns.exec(WEAKEN_WORKER, cfg.host, plan.w1Threads, cfg.target, w1Delay, cfg.instanceTag, batchId, "W1");
+  const growPid = ns.exec(GROW_WORKER, cfg.host, plan.growThreads, cfg.target, growDelay, cfg.instanceTag, batchId, "G");
+  const w2Pid = ns.exec(WEAKEN_WORKER, cfg.host, plan.w2Threads, cfg.target, w2Delay, cfg.instanceTag, batchId, "W2");
+
+  if (hackPid === 0 || w1Pid === 0 || growPid === 0 || w2Pid === 0) {
+    ns.print(
+      `WARN incomplete batch launch target=${cfg.target} tag=${cfg.instanceTag} ` +
+      `pids=[H:${hackPid},W1:${w1Pid},G:${growPid},W2:${w2Pid}]`,
+    );
+  }
 }
 
 function maxThreadsForBudget(budgetRamGb, reserveRamGb, scriptRam, ns, host) {
