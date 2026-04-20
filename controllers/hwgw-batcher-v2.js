@@ -807,7 +807,7 @@ function minimumBatchRam(ns, host) {
   return (
     ns.getScriptRam(HACK_WORKER, host) +
     ns.getScriptRam(GROW_WORKER, host) +
-    2 * ns.getScriptRam(WEAKEN_WORKER, host)
+    (2 * ns.getScriptRam(WEAKEN_WORKER, host))
   );
 }
 
