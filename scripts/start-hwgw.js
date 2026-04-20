@@ -193,6 +193,17 @@ function describeRamMode(ramLimitGb) {
   return "capped at " + ramLimitGb + " GB";
 }
 
+/**
+ * Params:
+ * - ns: Netscript handle
+ * - host: execution host
+ *
+ * Reads the smallest RAM footprint among HWGW worker scripts.
+ *
+ * @param {NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
 function getMinimumWorkerRam(ns, host) {
   var minimum = Infinity;
   var i;

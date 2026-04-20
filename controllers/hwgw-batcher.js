@@ -876,7 +876,8 @@ function describeRamMode(ramLimitGb) {
  * @returns {number}
  */
 function getRamStallLimit(pollMs) {
-  return Math.max(MIN_RAM_STALL_POLLS, Math.ceil(RAM_STALL_WINDOW_MS / Math.max(MIN_POLL_MS, pollMs)));
+  var effectivePollMs = Math.max(MIN_POLL_MS, pollMs);
+  return Math.max(MIN_RAM_STALL_POLLS, Math.ceil(RAM_STALL_WINDOW_MS / effectivePollMs));
 }
 
 /**
