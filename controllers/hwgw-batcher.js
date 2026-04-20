@@ -5,6 +5,8 @@ const WEAKEN_WORKER = "/workers/weaken-once.js";
 const WORKER_FILES = [HACK_WORKER, GROW_WORKER, WEAKEN_WORKER];
 const THREAD_PORT = 1;
 const RAM_STALL_WINDOW_MS = 30000;
+const MIN_POLL_MS = 20;
+const MIN_RAM_STALL_POLLS = 10;
 
 /** @param {NS} ns */
 export async function main(ns) {
@@ -874,7 +876,7 @@ function describeRamMode(ramLimitGb) {
  * @returns {number}
  */
 function getRamStallLimit(pollMs) {
-  return Math.max(10, Math.ceil(RAM_STALL_WINDOW_MS / Math.max(20, pollMs)));
+  return Math.max(MIN_RAM_STALL_POLLS, Math.ceil(RAM_STALL_WINDOW_MS / Math.max(MIN_POLL_MS, pollMs)));
 }
 
 /**
