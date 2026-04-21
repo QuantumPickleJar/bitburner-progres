@@ -145,7 +145,7 @@ export function calcBuffer(ns) {
     // calculate the proportion of money using BUFFER    
     const allocatedFunds = currentMoney.valueOf() * BUFFER;
 
-    if (verbose) ns.print(`INFO Allocated $${allocatedFunds} for stocks.`);
+    if (verbose) ns.print(`Allocated $${allocatedFunds} for stocks.`);
     return allocatedFunds;
 }
 
@@ -169,64 +169,49 @@ export function init(ns) {
 }
 
 
-let lastHeartbeat = 0;
-
 /**
  * @param {import("NetscriptDefinitions").NS} ns
  */
 export async function main(ns) {
     verbose = ns.args.includes("-v") || ns.args.includes("--verbose");
-    setInterval(printHeartbeat, 15000); 
-    // prepare market access
-    init(ns);
 
+    init(ns);
     stockObjects = ns.stock.getSymbols().map(sym => new Stock(sym, ns));
 
-    // Loop: Run a while(true) loop, sleeping for 6 seconds (or using ns.sleep(6000)) between 
-    // ticks to align with market updates.
+    let lastHeartbeat = 0;
 
     while (true) {
         player = ns.getPlayer();
-        await ns.sleep(2000);
 
-        if (Date.now() - lastHeartbeat > 15000) { 
+        const now = Date.now();
+        if (now - lastHeartbeat >= 15000) {
             printHeartbeat(ns);
-            lastHeartbeat = Date.now();
+            lastHeartbeat = now;
         }
 
-        // Sell loop:
-        for (let stock of stockObjects) {
-            if (stock.ownedLongShares > 0) {
-                // Sell Condition: If forecast < 0.50 (chance to go down) or if you need to liquidate for better opportunities, sell using ns.stock.sellStock(sym, shares).
-                if (stock.forecast < 0.5) {
-                    stock.sell(stock.ownedLongShares);
-                }
+        for (const stock of stockObjects) {
+            if (stock.ownedLongShares > 0 && stock.forecast < 0.5) {
+                stock.sell(stock.ownedLongShares);
             }
 
-            if (stock.ownedShortShares > 0) {
-                if (stock.forecast > 0.5) {
-                    stock.sellShort(stock.ownedShortShares);
-                }
+            if (stock.ownedShortShares > 0 && stock.forecast > 0.5) {
+                stock.sellShort(stock.ownedShortShares);
             }
         }
 
-        // Money Management: Keep a buffer of cash (e.g., 1–10 billion) to handle fees, investing only the remainder. 
         let budget = calcBuffer(ns);
 
-        // Buy loop
-        for (let stock of stockObjects) {
-            // Buy Condition: If forecast > 0.60 (60% chance to go up)
+        for (const stock of stockObjects) {
             if (stock.forecast > 0.6) {
                 const transactionCost = purchaseLongStocks(ns, stock, budget);
                 if (transactionCost > 0) {
                     budget -= transactionCost;
                 }
             }
-
         }
 
+        await ns.sleep(1500);
     }
-    ns.tprint("Stock trader deployed!");
 }
 /**
  * @param {import("NetscriptDefinitions").NS} ns 
