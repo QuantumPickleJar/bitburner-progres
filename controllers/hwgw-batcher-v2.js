@@ -90,9 +90,15 @@ export async function main(ns) {
     ns.print("Formulas API not available; using basic NS methods.");
   }
 
-  // --- Register with scheduler ---
+  // --- Prep target to ideal state BEFORE registering ---
+  // Registration must happen after prep so the scheduler doesn't assign a slot
+  // that expires while the batcher is still growing/weakening the target.
   var replyPort = REPLY_PORT_BASE + (ns.pid % REPLY_PORT_RANGE);
-  // Clear any stale data on our reply port from a previous run
+  await prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag, useFormulas);
+
+  // --- Register with scheduler ---
+  // Clear any stale port data accumulated during prep (e.g. from a prior run
+  // that shared the same PID mod-range), then register.
   ns.clearPort(replyPort);
 
   var regPayload = JSON.stringify({
@@ -103,11 +109,11 @@ export async function main(ns) {
     pid: ns.pid,
     replyPort: replyPort
   });
-  ns.tryWritePort(REGISTER_PORT, regPayload);
+  for (var _ri = 0; _ri < 10; _ri++) {
+    if (ns.tryWritePort(REGISTER_PORT, regPayload)) break;
+    await ns.sleep(200);
+  }
   ns.print("[" + instanceTag + "] Registered with scheduler. replyPort=" + replyPort);
-
-  // --- Prep target to ideal state before entering batch loop ---
-  await prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag, useFormulas);
 
   // --- Pipelined batch loop ---
   // Dispatch completes in milliseconds (workers handle their own timing).
@@ -117,6 +123,10 @@ export async function main(ns) {
   // saturate the budget, planBatch returns null and we wait.
   /** @type {Array<{batchId: number, jobs: Array<{pid:number, name:string, threads:number}>}>} */
   var inflightBatches = [];
+  // Tracks whether the last planBatch call returned null (RAM saturated).
+  // When transitioning back to a valid plan, we re-register so the scheduler
+  // knows we are ready — it may have us marked non-idle from before saturation.
+  var prevPlanNull = false;
 
   while (true) {
     // Prune finished batches and compute aggregate thread counts for snapshot
@@ -143,6 +153,7 @@ export async function main(ns) {
     var plan = planBatch(ns, target, execHost, ramLimitGb, desiredHack, gapMs, useFormulas);
 
     if (!plan) {
+      prevPlanNull = true;
       if (inflightBatches.length === 0) {
         // Nothing running and can't fit a batch → target drifted, re-prep
         await prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag, useFormulas);
@@ -153,13 +164,27 @@ export async function main(ns) {
       continue;
     }
 
+    if (prevPlanNull) {
+      // Coming out of RAM saturation: the scheduler may have us as non-idle
+      // (it marked idle=false when it last assigned, and we never consumed
+      // subsequent slots because the port filled up). Re-register to reset its
+      // state so it will assign a fresh slot.
+      prevPlanNull = false;
+      ns.print("[" + instanceTag + "] RAM freed — re-registering to request slot.");
+      for (var _r = 0; _r < 10; _r++) {
+        if (ns.tryWritePort(REGISTER_PORT, regPayload)) break;
+        await ns.sleep(200);
+      }
+    }
+
     // Wait for next slot assignment from scheduler
     var slot = await waitForSlot(ns, instanceTag, replyPort, pollMs);
 
     if (!slot) {
-      // Timeout — scheduler may have restarted
-      ns.print("[" + instanceTag + "] Re-registering with scheduler...");
-      for (var _r = 0; _r < 10; _r++) {
+      // Timeout — scheduler may have restarted; treat as saturation exit
+      prevPlanNull = true;
+      ns.print("[" + instanceTag + "] Slot timeout — re-registering with scheduler.");
+      for (var _rt = 0; _rt < 10; _rt++) {
         if (ns.tryWritePort(REGISTER_PORT, regPayload)) break;
         await ns.sleep(500);
       }
@@ -168,7 +193,7 @@ export async function main(ns) {
     }
 
     // Dispatch (near-instant: all workers launched with their delay as arg)
-    var result = await dispatchBatch(ns, target, execHost, plan, slot.landHackAt, gapMs, ramLimitGb, instanceTag);
+    var result = dispatchBatch(ns, target, execHost, plan, slot.landHackAt, gapMs, ramLimitGb, instanceTag);
 
     if (result.success) {
       inflightBatches.push({ batchId: slot.batchId, jobs: result.launchedJobs });
@@ -177,6 +202,10 @@ export async function main(ns) {
       ns.print("[" + instanceTag + "] Batch " + slot.batchId + " dispatched." +
                " inflight=" + inflightBatches.length +
                " peakRam=" + plan.peakRam.toFixed(0) + "GB");
+      // Yield to the event loop so other scripts can run between back-to-back
+      // dispatches. Without this, the synchronous dispatchBatch + immediate slot
+      // read can chain dozens of iterations with no await, starving the game loop.
+      await ns.sleep(0);
     } else {
       reportDone(ns, target, instanceTag, slot.batchId, false);
       // Wait for any partially-launched workers before re-prepping
@@ -213,6 +242,15 @@ async function waitForSlot(ns, tag, replyPort, pollMs) {
       try { msg = JSON.parse(String(raw)); } catch (_) { continue; }
 
       if (msg.type === "batchSlot" && msg.tag === tag) {
+        // Discard stale slots — landHackAt must be far enough in the future
+        // that we can still schedule at least the weaken worker (the last to
+        // start). A slot is usable if there is still time to sleep before launch.
+        var minLeadMs = 500;
+        if (msg.landHackAt - Date.now() < minLeadMs) {
+          ns.print("[" + tag + "] Discarding stale slot id=" + msg.batchId +
+                   " (landHackAt already passed or too soon)");
+          continue;
+        }
         return msg;
       }
       // Not for us (shouldn't happen with dedicated ports) — discard
@@ -271,7 +309,13 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag,
     if (curMoney < maxMoney * moneyReadyPct) {
       var growNeeded = estimateGrowThreads(ns, target, execHost, curMoney, maxMoney, useFormulas);
       var maxGrow = maxThreads(ns, GROW_WORKER, execHost, ramLimitGb);
-      if (maxGrow < 1) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
+      if (maxGrow < 1) {
+        // No RAM available right now — gate, don't error. Wait and retry.
+        ns.print("[" + instanceTag + "] prep: waiting for free RAM (grow)...");
+        snapshot(ns, execHost, target, instanceTag, 0, 0, 0);
+        await ns.sleep(pollMs * 5);
+        continue;
+      }
       var gt = Math.min(growNeeded, maxGrow);
       var pid = ns.exec(GROW_WORKER, execHost, gt, target);
       if (pid === 0) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
@@ -283,7 +327,13 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag,
     if (curSec > minSec + secReadyBuffer) {
       var wkNeeded = estimateWeakenThreads(ns, execHost, curSec - minSec);
       var maxWk = maxThreads(ns, WEAKEN_WORKER, execHost, ramLimitGb);
-      if (maxWk < 1) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
+      if (maxWk < 1) {
+        // No RAM available right now — gate, don't error. Wait and retry.
+        ns.print("[" + instanceTag + "] prep: waiting for free RAM (weaken)...");
+        snapshot(ns, execHost, target, instanceTag, 0, 0, 0);
+        await ns.sleep(pollMs * 5);
+        continue;
+      }
       var wt = Math.min(wkNeeded, maxWk);
       var pidW = ns.exec(WEAKEN_WORKER, execHost, wt, target);
       if (pidW === 0) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
@@ -426,38 +476,18 @@ function planBatch(ns, target, execHost, ramLimitGb, desiredHack, gapMs, useForm
     };
   }
 
-  // ── Phase 1: find initial fitting plan, scaling DOWN from desiredHack ────────
+  // Find the first fitting plan by scaling DOWN from desiredHack.
+  // In the pipelined model, batch size is intentionally kept at the configured
+  // hack fraction — pipeline depth (many concurrent batches) handles throughput.
+  // An upward fill search would produce a few giant batches instead of hundreds
+  // of small ones, which is worse for income.
   var fraction = desiredHack;
-  var basePlan = null;
   for (var i = 0; i < 40; i++) {
-    basePlan = tryFraction(fraction);
-    if (basePlan) break;
+    var plan = tryFraction(fraction);
+    if (plan) return plan;
     fraction *= 0.9;
   }
-  if (!basePlan) return null;
-
-  // ── Phase 2: binary-search UPWARD to fill available RAM (~85 % target) ───────
-  // peakRam scales roughly linearly with fraction, so the first estimate for
-  // the upper bound is usually close; 10 bisection steps refine it precisely.
-  var targetRam = availRam * 0.85;
-  if (basePlan.peakRam < targetRam) {
-    var lo = fraction;
-    var hi = Math.min(0.95, fraction * (targetRam / basePlan.peakRam));
-    var bestPlan = basePlan;
-    for (var j = 0; j < 10; j++) {
-      var mid = (lo + hi) / 2;
-      var candidate = tryFraction(mid);
-      if (candidate) {
-        bestPlan = candidate;
-        lo = mid;
-      } else {
-        hi = mid;
-      }
-    }
-    return bestPlan;
-  }
-
-  return basePlan;
+  return null;
 }
 
 // ─── Dispatch ────────────────────────────────────────────────────────
@@ -473,9 +503,9 @@ function planBatch(ns, target, execHost, ramLimitGb, desiredHack, gapMs, useForm
  * @param {number} gapMs
  * @param {number} ramLimitGb
  * @param {string} instanceTag
- * @returns {Promise<{success:boolean, launchedJobs:Array<{pid:number,name:string,threads:number}>}>}
+ * @returns {{success:boolean, launchedJobs:Array<{pid:number,name:string,threads:number}>}}
  */
-async function dispatchBatch(ns, target, execHost, plan, landHackAt, gapMs, ramLimitGb, instanceTag) {
+function dispatchBatch(ns, target, execHost, plan, landHackAt, gapMs, ramLimitGb, instanceTag) {
   var schedule = [];
   for (var i = 0; i < plan.jobs.length; i++) {
     schedule.push({

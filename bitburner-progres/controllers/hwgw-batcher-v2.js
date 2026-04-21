@@ -202,6 +202,10 @@ export async function main(ns) {
       ns.print("[" + instanceTag + "] Batch " + slot.batchId + " dispatched." +
                " inflight=" + inflightBatches.length +
                " peakRam=" + plan.peakRam.toFixed(0) + "GB");
+      // Yield to the event loop so other scripts can run between back-to-back
+      // dispatches. Without this, the synchronous dispatchBatch + immediate slot
+      // read can chain dozens of iterations with no await, starving the game loop.
+      await ns.sleep(0);
     } else {
       reportDone(ns, target, instanceTag, slot.batchId, false);
       // Wait for any partially-launched workers before re-prepping

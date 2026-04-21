@@ -21,7 +21,7 @@ const REGISTER_PORT = 2;
 const COMPLETE_PORT = 4;
 const THREAD_PORT   = 1;
 
-const POLL_MS = 50;
+const POLL_MS = 10;
 
 /** How far apart two batch landing windows must be (ms). 4 phases × gapMs + buffer. */
 const DEFAULT_GAP_MS = 100;
@@ -139,7 +139,7 @@ function handleRegister(ns, msg, targets, batchers, gapMs) {
     currentBatchId: 0
   });
 
-  ns.print("Registered batcher: " + msg.tag + " (" + msg.execHost + " → " + msg.target + ") replyPort=" + msg.replyPort);
+  ns.print("Registered batcher: " + msg.tag + " (" + msg.execHost + " \u2192 " + msg.target + ") replyPort=" + msg.replyPort);
 }
 
 /**
@@ -209,8 +209,6 @@ function assignSlots(ns, targets, batchers, gapMs, nextBatchId) {
     };
 
     if (!ns.tryWritePort(b.replyPort, JSON.stringify(slot))) {
-      // Reply port is full — batcher is not consuming slots fast enough.
-      // Do NOT advance nextLandAt or mark non-idle; retry next scheduler cycle.
       ns.print("WARN: Reply port full for " + b.tag + " (port " + b.replyPort + "); retrying.");
       continue;
     }

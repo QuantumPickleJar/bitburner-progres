@@ -21,7 +21,7 @@ const REGISTER_PORT = 2;
 const COMPLETE_PORT = 4;
 const THREAD_PORT   = 1;
 
-const POLL_MS = 50;
+const POLL_MS = 10;
 
 /** How far apart two batch landing windows must be (ms). 4 phases × gapMs + buffer. */
 const DEFAULT_GAP_MS = 100;
@@ -139,7 +139,7 @@ function handleRegister(ns, msg, targets, batchers, gapMs) {
     currentBatchId: 0
   });
 
-  ns.print("Registered batcher: " + msg.tag + " (" + msg.execHost + " → " + msg.target + ") replyPort=" + msg.replyPort);
+  ns.print("Registered batcher: " + msg.tag + " (" + msg.execHost + " \u2192 " + msg.target + ") replyPort=" + msg.replyPort);
 }
 
 /**
@@ -198,24 +198,27 @@ function assignSlots(ns, targets, batchers, gapMs, nextBatchId) {
     }
 
     var landHackAt = t.nextLandAt;
-
-    // Reserve the window: 4 phases × gapMs
-    t.nextLandAt = landHackAt + batchWindowMs + gapMs;
-    t.activeBatches++;
-
-    b.idle = false;
-    b.currentBatchId = nextBatchId++;
+    var slotBatchId = nextBatchId; // tentative — only committed if write succeeds
 
     var slot = {
       type: "batchSlot",
       target: b.target,
       tag: b.tag,
       landHackAt: landHackAt,
-      batchId: b.currentBatchId
+      batchId: slotBatchId
     };
 
-    ns.tryWritePort(b.replyPort, JSON.stringify(slot));
-    ns.print("Assigned slot to " + b.tag + " land=" + landHackAt + " id=" + b.currentBatchId + " port=" + b.replyPort);
+    if (!ns.tryWritePort(b.replyPort, JSON.stringify(slot))) {
+      ns.print("WARN: Reply port full for " + b.tag + " (port " + b.replyPort + "); retrying.");
+      continue;
+    }
+
+    // Write succeeded — commit state changes.
+    t.nextLandAt = landHackAt + batchWindowMs + gapMs;
+    t.activeBatches++;
+    b.idle = false;
+    b.currentBatchId = nextBatchId++;
+    ns.print("Assigned slot to " + b.tag + " land=" + landHackAt + " id=" + slotBatchId + " port=" + b.replyPort);
   }
 }
 
