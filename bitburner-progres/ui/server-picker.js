@@ -23,7 +23,7 @@ const STORE = {
 let triggerRender = null;
 
 /**
- * @param {AutocompleteData} data
+ * @param {import("NetscriptDefinitions").AutocompleteData} data
  * @param {string[]} args
  * @returns {string[]}
  */
@@ -31,7 +31,7 @@ export function autocomplete(data, args) {
   return data.txts.filter((name) => name.endsWith(".json"));
 }
 
-/** @param {NS} ns */
+/** @param {import("NetscriptDefinitions").NS} ns */
 export async function main(ns) {
   const file = String(ns.args[0] ?? DEFAULT_FILE);
 
