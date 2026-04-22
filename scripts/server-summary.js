@@ -21,3 +21,19 @@
  * - line of equals signs [====]  (z=1) (alternatively, the double pipe on its side could work)
  * - line of hyphens [-----]      (z=2)
  */
+
+/**
+ * 
+ * @param {import("NetscriptDefinitions").NS} ns
+ */
+export async function main(ns) { 
+
+}
+
+
+/**
+ * @param {import("NetscriptDefinitions").NS} ns
+ */
+export function renderProgressBars(ns) { 
+
+}
