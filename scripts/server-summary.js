@@ -22,6 +22,8 @@
  * - line of hyphens [-----]      (z=2)
  */
 import { readServerStore } from "../bitburner-progres/lib/server-store.js";
+import { ServerMultiProgressBar } from "../bitburner-progres/ui/components/ServerMultiProgressBar.js";
+
 /**
  * @typedef {import("../server-store.types.js").ServerSnapshot} ServerSnapshot
  */
@@ -36,17 +38,49 @@ let selectedIndex = -1;
  * 
  * * @param {import("NetscriptDefinitions").NS} ns 
  */
-export async function main(ns) { 
+export async function main(ns) {
 
-    servers = readServerStore(ns).servers;
-    
-    // detect button press
+  // handle UI
+  ns.disableLog("ALL");
+  ns.clearLog();
+
+  ns.ui.openTail();
+  ns.ui.setTailTitle("Servers Overview");
+  ns.ui.resizeTail(800, 360);
+  ns.ui.moveTail(80, 120);
+
+  ns.printRaw(React.createElement(ServerPowerViewer));
+
+  // servers = readServerStore(ns).servers; --> superceded by get-targets and writing to scored-servers.json
 
 
-    // on button press:
+  // detect button press
 
-    // change selectedIndex
+
+  // on button press:
+
+  // change selectedIndex
 
 }
 
 
+
+function ServerPowerViewer() {
+  const e = React.createElement;
+  const [, setVersion] = React.useState(0);
+
+  React.useEffect(() => {
+    triggerRender = function () {
+      setVersion((v) => v + 1);
+    };
+
+    return () => {
+      if (triggerRender) {
+        triggerRender = null;
+      }
+    };
+  }, []);
+
+  // read from get-targets 
+  const servers = 
+}
