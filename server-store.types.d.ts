@@ -29,3 +29,5 @@ export interface ServerStore {
 	updatedAt: number;
 	meta: ServerStoreMeta;
 }
+
+export type Nullable<ServerSnapshot> = ServerSnapshot | null;
