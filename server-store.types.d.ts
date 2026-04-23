@@ -29,3 +29,14 @@ export interface ServerStore {
 	updatedAt: number;
 	meta: ServerStoreMeta;
 }
+
+export interface NormalizedServerSnapshot { 
+	snapshot: ServerSnapshot;
+	moneyNow: number;
+	maxMoney: number;
+	moneyFillRatio: number;
+	security: number;
+	minSecurity: number;
+	securityRatio: number;
+	normalizedScore: number;
+}
