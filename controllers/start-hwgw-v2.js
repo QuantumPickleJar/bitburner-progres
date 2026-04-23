@@ -101,6 +101,28 @@ export async function main(ns) {
     return;
   }
 
+  // --- Preflight: validate per-batcher RAM caps are physically achievable ---
+  var execMaxRam = ns.getServerMaxRam(execHost);
+  var minWorkerRamOnHost = getMinimumWorkerRam(ns, execHost);
+  for (var rc = 0; rc < deployments.length; rc++) {
+    var rcDep = deployments[rc];
+    if (rcDep.ramLimitGb >= 0 && rcDep.ramLimitGb > execMaxRam) {
+      ns.tprint(
+        "ERROR: RAM budget for " + rcDep.target + " (" + rcDep.ramLimitGb + "GB) " +
+        "exceeds host max RAM on \"" + execHost + "\" (" + execMaxRam.toFixed(2) + "GB)."
+      );
+      return;
+    }
+    if (rcDep.ramLimitGb >= 0 && minWorkerRamOnHost > 0 && rcDep.ramLimitGb < minWorkerRamOnHost) {
+      ns.tprint(
+        "ERROR: RAM budget for " + rcDep.target + " (" + rcDep.ramLimitGb + "GB) " +
+        "is below the minimum worker RAM on \"" + execHost + "\" (" + minWorkerRamOnHost.toFixed(2) + "GB). " +
+        "Workers could never launch."
+      );
+      return;
+    }
+  }
+
   // --- Dry run ---
   if (dryRun) {
     ns.tprint("=== DRY RUN ===");
@@ -209,4 +231,20 @@ export async function main(ns) {
 export function autocomplete(data, args) {
   // Offer "server:" prefixed suggestions so the user can append a RAM budget
   return data.servers.map(/** @param {string} s */ function(s) { return s + ":"; });
+}
+
+/**
+ * Returns the smallest per-thread RAM cost among HWGW worker scripts on the given host.
+ *
+ * @param {import("NetscriptDefinitions").NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
+function getMinimumWorkerRam(ns, host) {
+  var minimum = Infinity;
+  for (var i = 0; i < WORKER_FILES.length; i++) {
+    var ram = ns.getScriptRam(WORKER_FILES[i], host);
+    if (ram > 0 && ram < minimum) minimum = ram;
+  }
+  return Number.isFinite(minimum) ? minimum : 0;
 }

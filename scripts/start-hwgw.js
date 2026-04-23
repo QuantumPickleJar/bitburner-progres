@@ -111,6 +111,24 @@ export async function main(ns) {
     }
   }
 
+  var execMaxRam = ns.getServerMaxRam(execHost);
+  if (ramLimitGb >= 0 && ramLimitGb > execMaxRam) {
+    ns.tprint(
+      'Failed preflight: ramLimitGb exceeds host capacity on "' + execHost + '". ' +
+      "ramLimitGb=" + ramLimitGb + "GB maxRam=" + execMaxRam.toFixed(2) + "GB."
+    );
+    return;
+  }
+
+  var minimumWorkerRam = getMinimumWorkerRam(ns, execHost);
+  if (ramLimitGb >= 0 && minimumWorkerRam > 0 && ramLimitGb < minimumWorkerRam) {
+    ns.tprint(
+      'Failed preflight: ramLimitGb is too low to run any worker on "' + execHost + '". ' +
+      "ramLimitGb=" + ramLimitGb + "GB minimumWorkerRam=" + minimumWorkerRam.toFixed(2) + "GB."
+    );
+    return;
+  }
+
   var freeRam = ns.getServerMaxRam(execHost) - ns.getServerUsedRam(execHost);
   if (freeRam < execBatcherRam) {
     ns.tprint(
@@ -173,6 +191,29 @@ function describeRamMode(ramLimitGb) {
     return "dynamic free RAM";
   }
   return "capped at " + ramLimitGb + " GB";
+}
+
+/**
+ * Params:
+ * - ns: Netscript handle
+ * - host: execution host
+ *
+ * Reads the smallest RAM footprint among HWGW worker scripts.
+ *
+ * @param {NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
+function getMinimumWorkerRam(ns, host) {
+  var minimum = Infinity;
+  var i;
+  for (i = 0; i < WORKER_FILES.length; i++) {
+    var ram = ns.getScriptRam(WORKER_FILES[i], host);
+    if (ram > 0 && ram < minimum) {
+      minimum = ram;
+    }
+  }
+  return Number.isFinite(minimum) ? minimum : 0;
 }
 
 function isNumericLike(value) {

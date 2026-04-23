@@ -38,6 +38,11 @@ const THREAD_PORT   = 1;
 const REPLY_PORT_BASE = 100;
 const REPLY_PORT_RANGE = 900;
 
+/** How long (ms) to tolerate zero-progress before aborting with an error. */
+const RAM_STALL_WINDOW_MS = 30000;
+const MIN_POLL_MS = 20;
+const MIN_RAM_STALL_POLLS = 10;
+
 /**
  * @param {import("NetscriptDefinitions").NS} ns
  */
@@ -117,6 +122,8 @@ export async function main(ns) {
   // saturate the budget, planBatch returns null and we wait.
   /** @type {Array<{batchId: number, jobs: Array<{pid:number, name:string, threads:number}>}>} */
   var inflightBatches = [];
+  var noPlanStreak = 0;
+  var noPlanLimit = ramStallLimit(pollMs);
 
   while (true) {
     // Prune finished batches and compute aggregate thread counts for snapshot
@@ -144,14 +151,35 @@ export async function main(ns) {
 
     if (!plan) {
       if (inflightBatches.length === 0) {
-        // Nothing running and can't fit a batch → target drifted, re-prep
+        // Nothing running and can't fit a batch → target may have drifted, re-prep.
+        // Guard: if re-prep completes instantly (target already ideal) and planning
+        // still fails, we are stuck in a tight spin. Count consecutive failures and
+        // abort with a diagnostic once the stall window expires.
+        noPlanStreak += 1;
+        if (noPlanStreak >= noPlanLimit) {
+          var freeNow = plannerFree(ns, execHost, ramLimitGb);
+          var minBatch = minimumBatchRam(ns, execHost);
+          snapshot(ns, execHost, target, instanceTag, 0, 0, 0);
+          throw new Error(
+            "[" + instanceTag + "] Batch planning stalled for " + noPlanStreak +
+            " consecutive attempts with no inflight work. " +
+            "plannerFree=" + freeNow.toFixed(2) + "GB " +
+            "minimumBatchRam=" + minBatch.toFixed(2) + "GB " +
+            "ramLimitGb=" + ramLimitGb
+          );
+        }
         await prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag, useFormulas);
+        // Ensure at least one poll-sleep per failed planning cycle so we never
+        // spin faster than pollMs even when prepTarget returns instantly.
+        await ns.sleep(pollMs);
       } else {
+        noPlanStreak = 0;
         // RAM saturated by inflight batches — wait for one to free up
         await ns.sleep(pollMs);
       }
       continue;
     }
+    noPlanStreak = 0;
 
     // Wait for next slot assignment from scheduler
     var slot = await waitForSlot(ns, instanceTag, replyPort, pollMs);
@@ -260,6 +288,9 @@ function reportDone(ns, target, tag, batchId, success) {
 async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag, useFormulas) {
   var moneyReadyPct = 0.999;
   var secReadyBuffer = 0.5;
+  var stallCount = 0;
+  var stallLimit = ramStallLimit(pollMs);
+  var minWorkerRam = minimumWorkerRam(ns, execHost);
 
   while (true) {
     var maxMoney  = ns.getServerMaxMoney(target);
@@ -271,10 +302,23 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag,
     if (curMoney < maxMoney * moneyReadyPct) {
       var growNeeded = estimateGrowThreads(ns, target, execHost, curMoney, maxMoney, useFormulas);
       var maxGrow = maxThreads(ns, GROW_WORKER, execHost, ramLimitGb);
-      if (maxGrow < 1) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
+      if (maxGrow < 1) {
+        stallCount += 1;
+        if (stallCount >= stallLimit) {
+          throwPrepStall(ns, instanceTag, execHost, ramLimitGb, minWorkerRam, stallCount);
+        }
+        snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue;
+      }
       var gt = Math.min(growNeeded, maxGrow);
       var pid = ns.exec(GROW_WORKER, execHost, gt, target);
-      if (pid === 0) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
+      if (pid === 0) {
+        stallCount += 1;
+        if (stallCount >= stallLimit) {
+          throwPrepStall(ns, instanceTag, execHost, ramLimitGb, minWorkerRam, stallCount);
+        }
+        snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue;
+      }
+      stallCount = 0;
       await waitPid(ns, execHost, target, pid, "grow", gt, pollMs, instanceTag);
       continue;
     }
@@ -283,10 +327,23 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag,
     if (curSec > minSec + secReadyBuffer) {
       var wkNeeded = estimateWeakenThreads(ns, execHost, curSec - minSec);
       var maxWk = maxThreads(ns, WEAKEN_WORKER, execHost, ramLimitGb);
-      if (maxWk < 1) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
+      if (maxWk < 1) {
+        stallCount += 1;
+        if (stallCount >= stallLimit) {
+          throwPrepStall(ns, instanceTag, execHost, ramLimitGb, minWorkerRam, stallCount);
+        }
+        snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue;
+      }
       var wt = Math.min(wkNeeded, maxWk);
       var pidW = ns.exec(WEAKEN_WORKER, execHost, wt, target);
-      if (pidW === 0) { snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue; }
+      if (pidW === 0) {
+        stallCount += 1;
+        if (stallCount >= stallLimit) {
+          throwPrepStall(ns, instanceTag, execHost, ramLimitGb, minWorkerRam, stallCount);
+        }
+        snapshot(ns, execHost, target, instanceTag, 0, 0, 0); await ns.sleep(pollMs); continue;
+      }
+      stallCount = 0;
       await waitPid(ns, execHost, target, pidW, "weaken-prep", wt, pollMs, instanceTag);
       continue;
     }
@@ -710,6 +767,68 @@ function norm(v, fb) {
  */
 function clamp(v, lo, hi) {
   return Math.min(Math.max(v, lo), hi);
+}
+
+/**
+ * Converts pollMs into a stall-limit poll count spanning RAM_STALL_WINDOW_MS.
+ *
+ * @param {number} pollMs
+ * @returns {number}
+ */
+function ramStallLimit(pollMs) {
+  var effectivePollMs = Math.max(MIN_POLL_MS, pollMs);
+  return Math.max(MIN_RAM_STALL_POLLS, Math.ceil(RAM_STALL_WINDOW_MS / effectivePollMs));
+}
+
+/**
+ * Returns the smallest RAM footprint among the HWGW worker scripts.
+ *
+ * @param {import("NetscriptDefinitions").NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
+function minimumWorkerRam(ns, host) {
+  var minimum = Infinity;
+  for (var i = 0; i < WORKER_FILES.length; i++) {
+    var ram = ns.getScriptRam(WORKER_FILES[i], host);
+    if (ram > 0 && ram < minimum) minimum = ram;
+  }
+  return Number.isFinite(minimum) ? minimum : 0;
+}
+
+/**
+ * Returns the minimum RAM needed for a single HWGW batch (1 thread each).
+ *
+ * @param {import("NetscriptDefinitions").NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
+function minimumBatchRam(ns, host) {
+  return (
+    ns.getScriptRam(HACK_WORKER, host) +
+    ns.getScriptRam(GROW_WORKER, host) +
+    (2 * ns.getScriptRam(WEAKEN_WORKER, host))
+  );
+}
+
+/**
+ * Throws a diagnostic error when prepTarget is stuck due to RAM shortage.
+ *
+ * @param {import("NetscriptDefinitions").NS} ns
+ * @param {string} instanceTag
+ * @param {string} execHost
+ * @param {number} ramLimitGb
+ * @param {number} minWorkerRam
+ * @param {number} stallCount
+ */
+function throwPrepStall(ns, instanceTag, execHost, ramLimitGb, minWorkerRam, stallCount) {
+  var freeNow = plannerFree(ns, execHost, ramLimitGb);
+  throw new Error(
+    "[" + instanceTag + "] Prep stalled for " + stallCount + " cycles. " +
+    "plannerFree=" + freeNow.toFixed(2) + "GB " +
+    "minimumWorkerRam=" + minWorkerRam.toFixed(2) + "GB " +
+    "ramLimitGb=" + ramLimitGb
+  );
 }
 
 /**

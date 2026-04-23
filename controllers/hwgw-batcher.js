@@ -4,6 +4,9 @@ const WEAKEN_WORKER = "/workers/weaken-once.js";
 
 const WORKER_FILES = [HACK_WORKER, GROW_WORKER, WEAKEN_WORKER];
 const THREAD_PORT = 1;
+const RAM_STALL_WINDOW_MS = 30000;
+const MIN_POLL_MS = 20;
+const MIN_RAM_STALL_POLLS = 10;
 
 /** @param {NS} ns */
 export async function main(ns) {
@@ -53,6 +56,8 @@ export async function main(ns) {
   }
 
   var i;
+  var noFitStreak = 0;
+  var noFitLimit = getRamStallLimit(pollMs);
   for (i = 0; i < WORKER_FILES.length; i++) {
     if (!ns.fileExists(WORKER_FILES[i], execHost)) {
       throw new Error('Missing worker on "' + execHost + '": ' + WORKER_FILES[i]);
@@ -98,11 +103,24 @@ export async function main(ns) {
     );
 
     if (plan === null) {
+      noFitStreak += 1;
+      if (noFitStreak >= noFitLimit) {
+        var plannerFree = getPlannerFreeRam(ns, execHost, ramLimitGb);
+        var minimumBatchRam = getMinimumBatchRam(ns, execHost);
+        publishThreadSnapshot(ns, execHost, target, 0, 0, 0);
+        throw new Error(
+          "[" + instanceTag + "] Batch planning stalled: no HWGW plan fit for " +
+          noFitStreak + " consecutive attempts. plannerFreeRam=" +
+          plannerFree.toFixed(2) + "GB minimumBatchRam=" + minimumBatchRam.toFixed(2) +
+          "GB ramLimitGb=" + ramLimitGb
+        );
+      }
       ns.print("[" + instanceTag + "] No batch fits right now. Retrying...");
       publishThreadSnapshot(ns, execHost, target, 0, 0, 0);
       await ns.sleep(pollMs);
       continue;
     }
+    noFitStreak = 0;
 
     printBatchSummary(ns, target, execHost, plan, ramLimitGb, gapMs, instanceTag);
 
@@ -243,6 +261,9 @@ function getMaxThreadsForScript(ns, script, host, ramLimitGb) {
 async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag) {
   var moneyReadyPct = 0.999;
   var secReadyBuffer = 0.05;
+  var prepStallCount = 0;
+  var prepStallLimit = getRamStallLimit(pollMs);
+  var minimumWorkerRam = getMinimumWorkerRam(ns, execHost);
 
   while (true) {
     var state = getTargetState(ns, target);
@@ -252,6 +273,10 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag)
       var maxWeaken = getMaxThreadsForScript(ns, WEAKEN_WORKER, execHost, ramLimitGb);
 
       if (maxWeaken < 1) {
+        prepStallCount += 1;
+        if (prepStallCount >= prepStallLimit) {
+          throwPrepStallError(ns, instanceTag, execHost, ramLimitGb, minimumWorkerRam, prepStallCount);
+        }
         publishThreadSnapshot(ns, execHost, target, 0, 0, 0);
         await ns.sleep(pollMs);
         continue;
@@ -261,6 +286,10 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag)
       var weakenPid = ns.exec(WEAKEN_WORKER, execHost, weakenThreads, target);
 
       if (weakenPid === 0) {
+        prepStallCount += 1;
+        if (prepStallCount >= prepStallLimit) {
+          throwPrepStallError(ns, instanceTag, execHost, ramLimitGb, minimumWorkerRam, prepStallCount);
+        }
         publishThreadSnapshot(ns, execHost, target, 0, 0, 0);
         await ns.sleep(pollMs);
         continue;
@@ -275,6 +304,7 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag)
         weakenThreads,
         pollMs
       );
+      prepStallCount = 0;
       continue;
     }
 
@@ -283,6 +313,10 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag)
       var maxGrow = getMaxThreadsForScript(ns, GROW_WORKER, execHost, ramLimitGb);
 
       if (maxGrow < 1) {
+        prepStallCount += 1;
+        if (prepStallCount >= prepStallLimit) {
+          throwPrepStallError(ns, instanceTag, execHost, ramLimitGb, minimumWorkerRam, prepStallCount);
+        }
         publishThreadSnapshot(ns, execHost, target, 0, 0, 0);
         await ns.sleep(pollMs);
         continue;
@@ -292,6 +326,10 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag)
       var growPid = ns.exec(GROW_WORKER, execHost, growThreads, target);
 
       if (growPid === 0) {
+        prepStallCount += 1;
+        if (prepStallCount >= prepStallLimit) {
+          throwPrepStallError(ns, instanceTag, execHost, ramLimitGb, minimumWorkerRam, prepStallCount);
+        }
         publishThreadSnapshot(ns, execHost, target, 0, 0, 0);
         await ns.sleep(pollMs);
         continue;
@@ -306,6 +344,7 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag)
         growThreads,
         pollMs
       );
+      prepStallCount = 0;
       continue;
     }
 
@@ -830,6 +869,63 @@ function describeRamMode(ramLimitGb) {
     return "dynamic (all currently free RAM)";
   }
   return "capped at " + ramLimitGb + " GB";
+}
+
+/**
+ * @param {number} pollMs
+ * @returns {number}
+ */
+function getRamStallLimit(pollMs) {
+  var effectivePollMs = Math.max(MIN_POLL_MS, pollMs);
+  return Math.max(MIN_RAM_STALL_POLLS, Math.ceil(RAM_STALL_WINDOW_MS / effectivePollMs));
+}
+
+/**
+ * @param {NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
+function getMinimumWorkerRam(ns, host) {
+  var minimum = Infinity;
+  var i;
+  for (i = 0; i < WORKER_FILES.length; i++) {
+    var ram = ns.getScriptRam(WORKER_FILES[i], host);
+    if (ram > 0 && ram < minimum) {
+      minimum = ram;
+    }
+  }
+  return Number.isFinite(minimum) ? minimum : 0;
+}
+
+/**
+ * @param {NS} ns
+ * @param {string} host
+ * @returns {number}
+ */
+function getMinimumBatchRam(ns, host) {
+  return (
+    ns.getScriptRam(HACK_WORKER, host) +
+    ns.getScriptRam(GROW_WORKER, host) +
+    (2 * ns.getScriptRam(WEAKEN_WORKER, host))
+  );
+}
+
+/**
+ * @param {NS} ns
+ * @param {string} instanceTag
+ * @param {string} execHost
+ * @param {number} ramLimitGb
+ * @param {number} minimumWorkerRam
+ * @param {number} prepStallCount
+ */
+function throwPrepStallError(ns, instanceTag, execHost, ramLimitGb, minimumWorkerRam, prepStallCount) {
+  var plannerFree = getPlannerFreeRam(ns, execHost, ramLimitGb);
+  throw new Error(
+    "[" + instanceTag + "] Prep stalled for " + prepStallCount +
+    " cycles. plannerFreeRam=" + plannerFree.toFixed(2) +
+    "GB minimumWorkerRam=" + minimumWorkerRam.toFixed(2) +
+    "GB ramLimitGb=" + ramLimitGb
+  );
 }
 
 /**
