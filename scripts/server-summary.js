@@ -24,6 +24,10 @@
 import { readServerStore } from "../bitburner-progres/lib/server-store.js";
 import { ServerMultiProgressBar } from "../bitburner-progres/ui/components/ServerMultiProgressBar.js";
 
+const SORTED_SCORED_RESULTS_FILE = "data/sorted-serversnapshot.json";
+
+
+
 /**
  * @typedef {import("../server-store.types.js").ServerSnapshot} ServerSnapshot
  */
@@ -49,7 +53,7 @@ export async function main(ns) {
   ns.ui.resizeTail(800, 360);
   ns.ui.moveTail(80, 120);
 
-  ns.printRaw(React.createElement(ServerPowerViewer));
+  ns.printRaw(React.createElement(ServerPowerViewer, null));
 
   // servers = readServerStore(ns).servers; --> superceded by get-targets and writing to scored-servers.json
 

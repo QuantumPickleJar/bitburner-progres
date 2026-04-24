@@ -30,13 +30,21 @@ export interface ServerStore {
 	meta: ServerStoreMeta;
 }
 
-export interface NormalizedServerSnapshot { 
-	snapshot: ServerSnapshot;
-	moneyNow: number;
-	maxMoney: number;
-	moneyFillRatio: number;
-	security: number;
-	minSecurity: number;
-	securityRatio: number;
-	normalizedScore: number;
+
+/**
+ * @typedef {object} ScoreResult
+ * @property {number} moneyFillRatio
+ * @property {number} maxMoneyFill
+ * @property {number} securityRatio
+ * @property {number} sizeScore
+ * @property {number} normalizedFill
+ * @property {number} score
+ */
+export interface ScoreResult { 
+	moneyFillRatio: moneyFill;
+	maxMoneyFill: maxMoneyFill;
+	securityRatio: securityRatio;
+	sizeScore: sizeScore;
+	normalizedFill: normalizedFill;
+	score: score;
 }

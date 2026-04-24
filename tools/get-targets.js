@@ -2,18 +2,15 @@
 /** @typedef {import("../server-store.types.js").ServerStore} ServerStore */
 /** @typedef {import("../server-store.types.js").ServerSnapshot} ServerSnapshot  */
 /** @typedef {import("../server-store.types.js").ServerStoreMeta}  ServerStoreMeta */
-// /** @typedef {import("../server-store.types.js").NormalizedServerSnapshot} NormalizedServerSnapshot*/
 /** @typedef {[number, ServerSnapshot]} ScoredServerSnapshotTupleOld */
-// /** @typedef {[import("../server-store.types.js").ScoreResult, ServerSnapshot]} ScoredServerSnapshotTuple */
 /** @typedef {import("../server-store.types.js").ScoreResult} ScoreResult */
 /** @typedef {[ScoreResult, ServerSnapshot]} ScoredServerSnapshotTuple */
-
 
 import { readServerStore } from "../bitburner-progres/lib/server-store";
 
 const DEFAULT_FILE = "data/home-neighbors.json";
 const DEFAULT_WRITE_FILE = "data/scored-server-data.json";
-const SORTED_SCORED_RESULTS_FILE = "data/sorted-serversnapshot"
+const SORTED_SCORED_RESULTS_FILE = "data/sorted-serversnapshot.json";
 /**
  * @type {Array<ServerSnapshot>}
  */
@@ -50,7 +47,7 @@ export async function main(ns, args) {
 
     init(ns);                                               // populate servers    
     ns.print(`DEBUG: calling getHackCandidates...`);
-    const sortedSnapshotsMap = getHackCandidates(ns);
+    const sortedSnapshotsMap = getSortedHackCandidates(ns);
     scoredServers = Array.from(sortedSnapshotsMap.values());
 
     // ns.disableLog("serverExists");
@@ -68,6 +65,7 @@ export async function main(ns, args) {
     ns.write(DEFAULT_WRITE_FILE, ""); // clear any existing data 
     writeServerScores(ns, scoredServers);
     // sortMapByServerScore(sortedSnapshotsMap);   // already called in getHackCandidates
+    writeSortedServerScores(ns);
     printScoresTable(ns);
 }
 
@@ -77,7 +75,7 @@ export async function main(ns, args) {
  * @param {import("NetscriptDefinitions").NS} ns
  * @returns array of ScoredServerSnapshotTuple
  */ 
-export function getHackCandidates(ns) { 
+export function getSortedHackCandidates(ns) { 
     /** @type {Map<string, ScoredServerSnapshotTuple>} */
     let primeCandidates = new Map();
     ns.print(`INFO: starting for-of loop:`);
@@ -188,6 +186,13 @@ export function writeServerScores(ns, scoreData, file = DEFAULT_WRITE_FILE) {
     ns.write(file, JSON.stringify(scoreData, null, 2), "w");
 }
 
+/**
+ * @param {import("NetscriptDefinitions").NS} ns 
+ * @param {Array<ScoredServerSnapshotTuple>} scoreData
+ */
+export function writeSortedServerScores(ns, scoreData = scoredServers, file = SORTED_SCORED_RESULTS_FILE) { 
+    ns.write(file, JSON.stringify(scoreData, null, 2), "w");
+}
 
 
 /**
@@ -272,7 +277,6 @@ export function scoreTargetServer(ns, server) {
     const tuple = [scoreDetails, server];
     
     scoredServers.push(tuple);
-    ns.write(JSON.stringify());
     return tuple;
 }
 
