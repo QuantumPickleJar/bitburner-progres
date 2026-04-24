@@ -48,3 +48,13 @@ export interface ScoreResult {
 	normalizedFill: normalizedFill;
 	score: score;
 }
+
+export interface MultiLayeredProgressBar { 
+	scoredSnapshotTuple: ScoredServerSnapshotTuple;
+	styles: Record<string, object>;
+}
+
+export interface ScoredServerSnapshotTuple { 
+	detailedScore: ScoreResult;
+	server: ServerSnapshot;
+}

@@ -39,7 +39,7 @@ export function init(ns) {
   * @param {import("NetscriptDefinitions").NS} ns
   */
 export async function main(ns, args) {
-    // open the tail window for them if they pass --
+    // open the tail window for them if they pass --tail
     const wantsTail = String(ns.args[0] ?? false);
     // todo: clean this up 
 

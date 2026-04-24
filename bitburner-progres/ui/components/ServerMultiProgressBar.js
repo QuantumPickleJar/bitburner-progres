@@ -2,7 +2,7 @@
 /** @typedef {import("../../../server-store.types.js").ServerSnapshot} ServerSnapshot  */
 /** @typedef {import("../../../server-store.types.js").ServerStoreMeta} ServerStoreMeta */
 /** @typedef {import("../../../server-store.types.js").ScoreResult} ScoreResult */
-/** @typedef {[ScoreResult, ServerSnapshot]} ScoredServerSnapshotTuple */
+/** @typedef {import("../../../server-store.types.js").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
 
 // /** @param {import("NetscriptDefinitions").NS} ns */
 // export async function main(ns) { 
@@ -21,9 +21,26 @@ export function ServerMultiProgressBar(props) {
     const e = React.createElement;
 
     if (props.scoredSnapshot) {
-
+        composeLayers(
+            renderZ0(20, Z0_CHAR),
+            renderZ1(20, scoredSnapshot.detailedScore.moneyFillRatio, {
+                fillChar: "░",
+                emptyChar: " ",
+            }),
+            renderZ2Bars(20, scoredSnapshot.detailedScore.securityRatio, {
+                tickChar: "-",
+                tickEvery: 1
+            }),
+        );
     }
 
+    const bar = createProgressbar(props.scoredSnapshot);
+
+    return e(
+      "div",
+      { style: styles.headerRow },
+      e("div", bar)
+    );
 }
 
 /**
@@ -104,7 +121,8 @@ function createProgressbar(serverTuple) {
     moneyBand.style.left = "0";
     moneyBand.style.bottom = "0";
     moneyBand.style.height = "100%";
-    moneyBand.style.width = `${serverTuple[0].moneyFillRatio * 100}%`;
+    // moneyBand.style.width = `${serverTuple[0].moneyFillRatio * 100}%`;
+    moneyBand.style.width = `${serverTuple.detailedScore.moneyFillRatio * 100}%`;
     moneyBand.style.background = "linear-gradient(to right, rgba(80,200,120,0.35))";
     
     // center band
@@ -113,7 +131,8 @@ function createProgressbar(serverTuple) {
     securityBand.style.left = "0";
     securityBand.style.bottom = "0";
     securityBand.style.height = "100%";
-    securityBand.style.width = `${serverTuple[0].securityRatio * 100}%`;
+    // securityBand.style.width = `${serverTuple[0].securityRatio * 100}%`;
+    securityBand.style.width = `${serverTuple.detailedScore.securityRatio * 100}%`;
     securityBand.style.background = "linear-gradient(to right, rgba(76, 125, 184, 0.64))";
 
     // top band (WIP)
@@ -183,20 +202,26 @@ function renderZ1(width, ratio, options = {}) {
 }
 
 /**
- * 
+ * this method seems wrong.  the parameter name like tickEvery and Offset make me think it's
+ * not sharing the same width as the other servers 
  * @param {number} width 
+ * @param {number} ratio
  * @param {Object} options 
  * @param {number} [options.tickEvery]
  * @param {number} [options.tickOffset]
  * @param {string} [options.tickChar]
  * @returns {string[]}
  */
-function renderZ2Bars(width, options = {}) { 
+function renderZ2Bars(width, ratio, options = {}) { 
     const layer = makeBlankLayer(width);
+    const normalized = clamp01(ratio);
 
     const tickEvery = options.tickEvery ?? 4;
     const tickOffset = options.tickOffset ?? 0;
     const tickChar = options.tickChar ?? "=";
+
+    const innerWidth = width - 2;
+    const filledCells = Math.round(innerWidth * normalized);
 
     if (width <=2 || tickEvery <=0) return layer;
 
@@ -227,18 +252,24 @@ function clamp01(value) {
 
 // @TODO: come back and add RAM to the server-store so we can display that too
 /**
- * converts a ScoredServerSnapshot
+ * converts a ScoredServerSnapshot to something that the element can render
  * @param {ScoredServerSnapshotTuple} snapshot
  */
 function normalizeServerSnapshot(snapshot) { 
-    const moneyRatio = snapshot[0].moneyFillRatio;
-    const securityRatio = snapshot[0].securityRatio;
+
+    // why this syntax changed because of the import, beats me
+
+    // const moneyRatio = snapshot[0].moneyFillRatio;
+    // const securityRatio = snapshot[0].securityRatio;
+    
+    const moneyRatio = snapshot.detailedScore.moneyFillRatio;
+    const securityRatio = snapshot.detailedScore.securityRatio;
     // const ramRatio = 
 
     // we likely don't need to clamp it again since it does that in server-store.js and get-targets.js
     return { 
         moneyRatio: clamp01(moneyRatio), 
         securityRatio: clamp01(securityRatio),
-
+        // ramRatio: clamp01(ramRatio)
     }
 }
