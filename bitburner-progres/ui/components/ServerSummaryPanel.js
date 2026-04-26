@@ -7,8 +7,8 @@
 
 import { ServerMultiProgressBar } from "../components/ServerMultiProgressBar";
 
-/** @type {Array<MultiProgressBar>} */
-let serverElements = [];
+// /** @type {Array<MultiProgressBar>} */
+// let serverElements = [];
 
 /** 
  * @param {object} props
@@ -19,28 +19,18 @@ let serverElements = [];
  */
 export function ServerSummaryPanel({ servers, refreshFn, styles }) { 
     const e = React.createElement;
-
-    // const options = servers.map((
-    
-    // load a progress bar for each servers
-
-    for (const tuple of servers) { 
-        /** @type {MultiProgressBar} */
-        const progBar = ServerMultiProgressBar(
-            { scoredSnapshot: tuple,
-              styles: styles,
-            }
-        );
-
-        serverElements.push(progBar);
-
-        // push to serverElements
-    }
+    const serverElements = servers.map((tuple, i) =>
+        e(ServerMultiProgressBar, { 
+            key: tuple.server?.hostname ?? i,
+            scoredSnapshot: tuple,
+            styles: styles
+        })
+    );
 
     return e(
         "div",
         { style: styles.headerRow },
         e("button", { style: styles.button, onClick: refreshFn }, "Refresh"),
-
+        e("div", {style: styles.headerCenter }, serverElements),
     );
 }

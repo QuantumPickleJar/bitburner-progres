@@ -6,7 +6,7 @@
 /** @typedef {import("../server-store.types.js").ScoreResult} ScoreResult */
 /** @typedef {[ScoreResult, ServerSnapshot]} ScoredServerSnapshotTuple */
 
-import { readServerStore } from "../bitburner-progres/lib/server-store";
+import { readServerStore, refreshAllServerSnapshots } from "../bitburner-progres/lib/server-store";
 
 const DEFAULT_FILE = "data/home-neighbors.json";
 const DEFAULT_WRITE_FILE = "data/scored-server-data.json";
@@ -40,11 +40,13 @@ export function init(ns) {
   */
 export async function main(ns, args) {
     // open the tail window for them if they pass --tail
-    const wantsTail = String(ns.args[0] ?? false);
+    const wantsTail = ns.args.some((arg) => String(arg) === "--tail");
     // todo: clean this up 
 
     if (wantsTail) openLoggingTail(ns);
 
+    // Pull fresh live stats before scoring so downstream UI bars move with game state.
+    refreshAllServerSnapshots(ns, DEFAULT_FILE);
     init(ns);                                               // populate servers    
     ns.print(`DEBUG: calling getHackCandidates...`);
     const sortedSnapshotsMap = getSortedHackCandidates(ns);

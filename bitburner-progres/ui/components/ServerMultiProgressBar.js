@@ -6,7 +6,7 @@
 
 // /** @param {import("NetscriptDefinitions").NS} ns */
 // export async function main(ns) { 
-    
+
 // }
 
 const Z0_CHAR = "▒";
@@ -17,30 +17,53 @@ const Z0_CHAR = "▒";
  * @param {Record<string, object>} props.styles
  */
 export function ServerMultiProgressBar(props) {
-    const {scoredSnapshot, styles} = props;
-    const e = React.createElement;
+  const { scoredSnapshot, styles } = props;
+  const e = React.createElement;
 
-    if (props.scoredSnapshot) {
-        composeLayers(
-            renderZ0(20, Z0_CHAR),
-            renderZ1(20, scoredSnapshot.detailedScore.moneyFillRatio, {
-                fillChar: "░",
-                emptyChar: " ",
-            }),
-            renderZ2Bars(20, scoredSnapshot.detailedScore.securityRatio, {
-                tickChar: "-",
-                tickEvery: 1
-            }),
-        );
-    }
-
-    const bar = createProgressbar(props.scoredSnapshot);
-
-    return e(
-      "div",
-      { style: styles.headerRow },
-      e("div", bar)
+  if (props.scoredSnapshot) {
+    composeLayers(
+      renderZ0(20, Z0_CHAR),
+      renderZ1(20, scoredSnapshot.detailedScore.moneyFillRatio, {
+        fillChar: "░",
+        emptyChar: " ",
+      }),
+      renderZ2Bars(20, scoredSnapshot.detailedScore.securityRatio, {
+        tickChar: "-",
+        tickEvery: 1
+      }),
     );
+  }
+
+  const bar = createProgressbar(props.scoredSnapshot);
+
+  return e(
+    "div",
+    {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        marginBottom: "6px",
+        width: "100%"
+      }
+    },
+    // display the server name to the left of the bar
+    e(
+      "span",
+      {
+        style: {
+          width: "128px",
+          flex: "0 0 128px",
+          textAlign: "left",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis"
+        }
+      },
+      props.scoredSnapshot.server.hostname
+    ),
+    e("div", { style: { flex: "1 1 auto", minWidth: "120px" } }, bar)
+  );
 }
 
 /**
@@ -49,21 +72,21 @@ export function ServerMultiProgressBar(props) {
  * @returns {string}
  */
 function composeLayers(...layers) {
-    const width = layers.length > 0 ? Math.max(...layers.map((x) => x.length)): 0;
-    const out = Array.from({ length: width }, () => " ");
+  const width = layers.length > 0 ? Math.max(...layers.map((x) => x.length)) : 0;
+  const out = Array.from({ length: width }, () => " ");
 
-    for (const layer of layers) { 
-        for (let i = 0; i < width; i++) {
-            const char = layer[i] ?? " ";
-            // print non-empty characters to replace the empty space
-            if (char !== " ") {
-                out[i] = char;
-            }
-            
-        }
+  for (const layer of layers) {
+    for (let i = 0; i < width; i++) {
+      const char = layer[i] ?? " ";
+      // print non-empty characters to replace the empty space
+      if (char !== " ") {
+        out[i] = char;
+      }
+
     }
+  }
 
-    return out.join("");
+  return out.join("");
 }
 
 // /** 
@@ -104,45 +127,58 @@ function composeLayers(...layers) {
  * 
  * @param {ScoredServerSnapshotTuple} serverTuple 
  */
-function createProgressbar(serverTuple) { 
-    
-    const root = document.createElement("div");
-    root.style.position = "relative";
-    root.style.width = "100%";
-    root.style.height = "14px";
-    root.style.border = "1px solid #9250ff";
-    root.style.background = "#111";
-    root.style.overflow = "hidden";
-    root.style.boxSizing = "border-box";
+function createProgressbar(serverTuple) {
+  const e = React.createElement;
+  const moneyRatio = clamp01(serverTuple?.detailedScore?.moneyFillRatio ?? 0);
+  const securityRatio = clamp01(serverTuple?.detailedScore?.securityRatio ?? 0);
 
-    // bottom band
-    const moneyBand = document.createElement("div");
-    moneyBand.style.position = "absolute"; 
-    moneyBand.style.left = "0";
-    moneyBand.style.bottom = "0";
-    moneyBand.style.height = "100%";
-    // moneyBand.style.width = `${serverTuple[0].moneyFillRatio * 100}%`;
-    moneyBand.style.width = `${serverTuple.detailedScore.moneyFillRatio * 100}%`;
-    moneyBand.style.background = "linear-gradient(to right, rgba(80,200,120,0.35))";
-    
-    // center band
-    const securityBand = document.createElement("div");
-    securityBand.style.position = "absolute"; 
-    securityBand.style.left = "0";
-    securityBand.style.bottom = "0";
-    securityBand.style.height = "100%";
-    // securityBand.style.width = `${serverTuple[0].securityRatio * 100}%`;
-    securityBand.style.width = `${serverTuple.detailedScore.securityRatio * 100}%`;
-    securityBand.style.background = "linear-gradient(to right, rgba(76, 125, 184, 0.64))";
+  const moneyPct = `${moneyRatio * 100}%`;
+  const securityPct = `${securityRatio * 100}%`;
 
-    // top band (WIP)
-    
-
-    root.appendChild(moneyBand);
-    root.appendChild(securityBand);
-    // root.appendChild(thirdBand);
-
-    return root;
+  return e(
+    "div",
+    {
+      style: {
+        position: "relative",
+        width: "100%",
+        height: "12px",
+        border: "1px solid #9250ff",
+        background: "rgba(146, 80, 255, 0.08)",
+        overflow: "hidden",
+        boxSizing: "border-box"
+      }
+    },
+    // z0 background gives baseline visibility even with 0 ratios
+    e("div", {
+      style: {
+        position: "absolute",
+        inset: "0",
+        background: "repeating-linear-gradient(90deg, rgba(146, 80, 255, 0.08) 0px, rgba(146, 80, 255, 0.08) 3px, rgba(146, 80, 255, 0.02) 3px, rgba(146, 80, 255, 0.02) 6px)"
+      }
+    }),
+    // z1 money fill occupies full height
+    e("div", {
+      style: {
+        position: "absolute",
+        left: "0",
+        bottom: "0",
+        height: "100%",
+        width: moneyPct,
+        background: "linear-gradient(to right, rgba(80, 200, 120, 0.22), rgba(80, 200, 120, 0.48))"
+      }
+    }),
+    // z2 security overlay is a top stripe so both layers remain visible
+    e("div", {
+      style: {
+        position: "absolute",
+        left: "0",
+        top: "0",
+        height: "45%",
+        width: securityPct,
+        background: "repeating-linear-gradient(90deg, rgba(76, 125, 184, 0.85) 0px, rgba(76, 125, 184, 0.85) 5px, rgba(76, 125, 184, 0.35) 5px, rgba(76, 125, 184, 0.35) 8px)"
+      }
+    })
+  );
 }
 /* ==================== UTILITY FUNCTIONS: Z-Levels ====================== */
 
@@ -152,12 +188,12 @@ function createProgressbar(serverTuple) {
  * @param {string} backgroundChar 
  * @returns {string[]}
  */
-function renderZ0(width, backgroundChar = Z0_CHAR) { 
-    return Array.from({
-        length: Math.max(0, width),
-        },
-        () => backgroundChar
-    );
+function renderZ0(width, backgroundChar = Z0_CHAR) {
+  return Array.from({
+    length: Math.max(0, width),
+  },
+    () => backgroundChar
+  );
 }
 
 
@@ -172,33 +208,33 @@ function renderZ0(width, backgroundChar = Z0_CHAR) {
  * @param {string} [options.emptyChar]
  * @returns {string[]}
  */
-function renderZ1(width, ratio, options = {}) { 
-    const layer = makeBlankLayer(width);
-    const normalized = clamp01(ratio);
+function renderZ1(width, ratio, options = {}) {
+  const layer = makeBlankLayer(width);
+  const normalized = clamp01(ratio);
 
-    // safety checks and fallbacks
-    if (!options.leftChar) options.leftChar = "{";
-    if (!options.rightChar) options.rightChar = "}";
-    if (!options.emptyChar) options.emptyChar = "";
-    if (!options.fillChar) options.fillChar = "+";
-    // if (!options.fillChar) options.fillChar = "=";
+  // safety checks and fallbacks
+  if (!options.leftChar) options.leftChar = "{";
+  if (!options.rightChar) options.rightChar = "}";
+  if (!options.emptyChar) options.emptyChar = "";
+  if (!options.fillChar) options.fillChar = "+";
+  // if (!options.fillChar) options.fillChar = "=";
 
-    if (width <= 0) return layer;
-    if (width === 1 ) {
-        if (options.fillChar) {
-            layer[0] = options.fillChar;
-            return layer;
-        }
+  if (width <= 0) return layer;
+  if (width === 1) {
+    if (options.fillChar) {
+      layer[0] = options.fillChar;
+      return layer;
     }
+  }
 
-    const innerWidth = width - 2;
-    const filledCells = Math.round(innerWidth * normalized);
+  const innerWidth = width - 2;
+  const filledCells = Math.round(innerWidth * normalized);
 
-    for (let i = 0; i < innerWidth; i++) {
-        layer[i + 1] = i < filledCells ? options.fillChar : options.emptyChar;
-    }
+  for (let i = 0; i < innerWidth; i++) {
+    layer[i + 1] = i < filledCells ? options.fillChar : options.emptyChar;
+  }
 
-    return layer;
+  return layer;
 }
 
 /**
@@ -212,23 +248,23 @@ function renderZ1(width, ratio, options = {}) {
  * @param {string} [options.tickChar]
  * @returns {string[]}
  */
-function renderZ2Bars(width, ratio, options = {}) { 
-    const layer = makeBlankLayer(width);
-    const normalized = clamp01(ratio);
+function renderZ2Bars(width, ratio, options = {}) {
+  const layer = makeBlankLayer(width);
+  const normalized = clamp01(ratio);
 
-    const tickEvery = options.tickEvery ?? 4;
-    const tickOffset = options.tickOffset ?? 0;
-    const tickChar = options.tickChar ?? "=";
+  const tickEvery = options.tickEvery ?? 4;
+  const tickOffset = options.tickOffset ?? 0;
+  const tickChar = options.tickChar ?? "=";
 
-    const innerWidth = width - 2;
-    const filledCells = Math.round(innerWidth * normalized);
+  const innerWidth = width - 2;
+  const filledCells = Math.round(innerWidth * normalized);
 
-    if (width <=2 || tickEvery <=0) return layer;
+  if (width <= 2 || tickEvery <= 0) return layer;
 
-    for (let i = 1; i < width - 1; i += tickEvery) {
-        layer[i] = tickChar;
-    }
-    return layer;
+  for (let i = 1; i < width - 1; i += tickEvery) {
+    layer[i] = tickChar;
+  }
+  return layer;
 }
 
 /* ==================== UTILITY FUNCTIONS: ======================*/
@@ -238,7 +274,7 @@ function renderZ2Bars(width, ratio, options = {}) {
  * @returns {string[]}
  */
 function makeBlankLayer(width) {
-    return Array.from({length: Math.max(0, width) }, () => " ");
+  return Array.from({ length: Math.max(0, width) }, () => " ");
 }
 
 /**
@@ -246,8 +282,8 @@ function makeBlankLayer(width) {
  * @param {number} value 
  * @returns {number}
  */
-function clamp01(value) { 
-    return Math.max(0, Math.min(1, value));
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
 }
 
 // @TODO: come back and add RAM to the server-store so we can display that too
@@ -255,21 +291,21 @@ function clamp01(value) {
  * converts a ScoredServerSnapshot to something that the element can render
  * @param {ScoredServerSnapshotTuple} snapshot
  */
-function normalizeServerSnapshot(snapshot) { 
+function normalizeServerSnapshot(snapshot) {
 
-    // why this syntax changed because of the import, beats me
+  // why this syntax changed because of the import, beats me
 
-    // const moneyRatio = snapshot[0].moneyFillRatio;
-    // const securityRatio = snapshot[0].securityRatio;
-    
-    const moneyRatio = snapshot.detailedScore.moneyFillRatio;
-    const securityRatio = snapshot.detailedScore.securityRatio;
-    // const ramRatio = 
+  // const moneyRatio = snapshot[0].moneyFillRatio;
+  // const securityRatio = snapshot[0].securityRatio;
 
-    // we likely don't need to clamp it again since it does that in server-store.js and get-targets.js
-    return { 
-        moneyRatio: clamp01(moneyRatio), 
-        securityRatio: clamp01(securityRatio),
-        // ramRatio: clamp01(ramRatio)
-    }
+  const moneyRatio = snapshot.detailedScore.moneyFillRatio;
+  const securityRatio = snapshot.detailedScore.securityRatio;
+  // const ramRatio = 
+
+  // we likely don't need to clamp it again since it does that in server-store.js and get-targets.js
+  return {
+    moneyRatio: clamp01(moneyRatio),
+    securityRatio: clamp01(securityRatio),
+    // ramRatio: clamp01(ramRatio)
+  }
 }
