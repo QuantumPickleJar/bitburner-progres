@@ -4,9 +4,10 @@
 /** @typedef {import("../server-store.types.js").ServerStoreMeta}  ServerStoreMeta */
 /** @typedef {[number, ServerSnapshot]} ScoredServerSnapshotTupleOld */
 /** @typedef {import("../server-store.types.js").ScoreResult} ScoreResult */
-/** @typedef {[ScoreResult, ServerSnapshot]} ScoredServerSnapshotTuple */
+/** @typedef {import("../server-store.types.js").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
 
 import { readServerStore, refreshAllServerSnapshots } from "../bitburner-progres/lib/server-store";
+import { sortMapByServerScore } from "./sortMapByServerScore";
 
 const DEFAULT_FILE = "data/home-neighbors.json";
 const DEFAULT_WRITE_FILE = "data/scored-server-data.json";
@@ -75,11 +76,12 @@ export async function main(ns, args) {
 /**
  * returns an array of servers ordered by their desirability for hacking
  * @param {import("NetscriptDefinitions").NS} ns
- * @returns array of ScoredServerSnapshotTuple
+ * @returns {Map<string, ScoredServerSnapshotTuple>} Key=hostname, Value=scored snapshot object for that server.
  */ 
 export function getSortedHackCandidates(ns) { 
     /** @type {Map<string, ScoredServerSnapshotTuple>} */
     let primeCandidates = new Map();
+
     ns.print(`INFO: starting for-of loop:`);
     ns.print(`> Size of servers: ${servers.length}`);
 
@@ -88,14 +90,12 @@ export function getSortedHackCandidates(ns) {
         //     ${(server.hasRoot) ? "ROOTED" : "UNROOTED"}, ${(server.backdoor) ? "ISOLATED" : "BACKDOORED"}, `);
         // ns.print(`DEBUG: Calculating score for ${server.hostname}...`);
         
-        let serverScore = scoreTargetServer(ns, server);
-        
-        /** @type {ScoreResult} */
-        const scoreResult = serverScore[0];
+        const serverScore = scoreTargetServer(ns, server);
 
         // ns.print(`DEBUG: Calculated score of ${scoreResult.score} for ${server.hostname}.`);
-        
-        primeCandidates.set(server.hostname, [scoreResult, server]);
+
+        // Hostname is duplicated in key/value by design: key gives O(1) lookup; value carries full payload.
+        primeCandidates.set(serverScore.server.hostname, serverScore);
     }
     
     // ns.print(`SUCCESS assigned scores to ${primeCandidates.size} servers.`);
@@ -106,47 +106,6 @@ export function getSortedHackCandidates(ns) {
     return sortedCandidates;
 }
 
-
-/**
- * @param {Map<string, ScoredServerSnapshotTuple>} map
- */
-export function sortMapByServerScore(map) { 
-    /** @type {Map<string, ScoredServerSnapshotTuple>} */
-    const sortedServersMap = new Map();
-    
-    /** @type {Map<string, ScoredServerSnapshotTuple>} */
-    const mutableMap = new Map(map);
-
-    for (const [hostname, scoredTuple] of mutableMap) {
-        if (scoredTuple[0] !== undefined) {
-            // sortedServersArray.push(scoredServer);
-            // sortedServersMap.set(hostname, scoredTuple);
-            mutableMap.set(hostname, scoredTuple);
-        }
-    }
-
-    const sortedServersArray = mutableMap.entries()
-                                         .toArray()
-                                         .sort((a, b) => 
-                                            b[1][0].score - a[1][0].score
-                                         ).reverse();
-                                         
-    // now that the array is sorted, we can treat it like a queue to push into the map
-    for (let i = 0; i < mutableMap.size; i++) {
-        const scoredTupleRow = sortedServersArray.pop();
-        if (!scoredTupleRow) continue               // null-safety check        
-        sortedServersMap.set(scoredTupleRow[0],scoredTupleRow[1]);
-    }
-
-    // for (const scoredServer of sortedServersArray) {
-    //     // [score, ServerSnapshot]\
-    //     // TODO: verify that scoredServer[0] is the hostname and not the score
-    //     sortedServersMap.set(scoredServer[0], scoredServer[1]);
-    // }
-
-    return sortedServersMap;
-    // return sortedServersArray.sort((a, b) => b[0] - a[0]);
-}
 
 /**
  * @deprecated
@@ -276,7 +235,7 @@ export function scoreTargetServer(ns, server) {
     
     // push to scoredServers
     /** @type {ScoredServerSnapshotTuple} */
-    const tuple = [scoreDetails, server];
+    const tuple = { detailedScore: scoreDetails, server };
     
     scoredServers.push(tuple);
     return tuple;
@@ -286,25 +245,12 @@ export function scoreTargetServer(ns, server) {
 
 /**
  * @param {import("NetscriptDefinitions").NS} ns
+ * @param {Map<string, ScoredServerSnapshotTuple>} serversMap Key=hostname, Value=scored snapshot object.
  * @param {Map<string, ScoredServerSnapshotTuple>} serversMap
  */
 export function printServerMap(ns, serversMap) { 
-    const serversArray = Array.from(serversMap);
-
-    // I think the outermost string was supposed to be for using that index's ServerSnapshot.hostname as a key
-    for(let i = 0; i > serversArray.length; ++i) {
-        // in order, by depth: 
-        // serversMap[i]       | the iterator                   (Iterable<)
-        // serversMap[i][0]    | Map<K> - Hostname                                  (string)
-        // serversMap[i][1]    | Map<V> - ScoredServerSnapshotTuple (string, ServerSnapshot)
-        // serversMap[i][1][0] | ServerSnapshotTuple.score                          (number)
-        // serversMap[i][1][1] | ServerSnapshotTuple.ServerSnapshot         (ServerSnapShot)
-        
-        const currentWrappedTuple = serversArray[i]; 
-
-        // these both print the same thing, but for clarity we print serversMap[i][0]
-        // ns.print(`Arr[${i}]: ${serversArray[i][1][1].hostname} with score ${serversArray[i][0]}`);
-        ns.print(`Arr[${i}]: ${currentWrappedTuple[0]} with score ${currentWrappedTuple[1][0]}`);
+    for (const [hostname, scoredTuple] of serversMap.entries()) {
+        ns.print(`Server ${scoredTuple.server.hostname} (key: ${hostname}) score=${scoredTuple.detailedScore.score.toFixed(3)}`);
     }
 }
 
@@ -313,13 +259,8 @@ export function printServerMap(ns, serversMap) {
  * @param {Array<ScoredServerSnapshotTuple>} serversArr
  */
 export function printServerArray(ns, serversArr) { 
-    // for(const server of serversArr) { 
-    for(let i = 0; i > serversArr.length; ++i) {
-        // in order, by depth: 
-        // serversMap[i]       | the iterator
-        // serversMap[i][0]    | Score (string)
-        // serversMap[i][1]    | ScoredServerSnapshotTuple (string, ServerSnapshot)
-        ns.print(`Arr[${i}]: ${serversArr[i][1].hostname} with score ${serversArr[i][0]}`);
+    for (let i = 0; i < serversArr.length; ++i) {
+        ns.print(`Arr[${i}]: ${serversArr[i].server.hostname} with score ${serversArr[i].detailedScore.score.toFixed(3)}`);
     }
 }
 
@@ -337,9 +278,9 @@ export function printScoresTable(ns) {
     // print the header
     ns.printf(`\tSERVER    \tSCORE\t\tFILL\t\tSECURITY`);
 
-    for (const duo of tuples) { 
-        const stats = duo[0];
-        const server = duo[1];
+    for (const scoredSnapshot of tuples) { 
+        const stats = scoredSnapshot.detailedScore;
+        const server = scoredSnapshot.server;
         // String.raw("%15s\t%4.1f",[server.hostname, stats.score]);
         ns.printf("%20s\t%8.3f\t%8.3f%%\t%.3f%%", server.hostname, stats.score, stats.moneyFillRatio * 100, stats.securityRatio * 100);
     }    

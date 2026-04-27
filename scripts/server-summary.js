@@ -23,7 +23,7 @@
  */
 
 import { ServerSummaryPanel } from "../bitburner-progres/ui/components/ServerSummaryPanel.js";
-
+import { sortArrayByServerScore, sortArrayAlphabetically } from "../tools/sortMapByServerScore.js";
 const SORTED_SCORED_RESULTS_FILE = "data/sorted-serversnapshot.json";
 const GET_TARGETS_SCRIPT = "tools/get-targets.js";
 
@@ -38,7 +38,7 @@ let serverTuples = [];
 
 /** @type { null | (() => void)} */
 let triggerRender = null;
-let selectedIndex = -1;
+// let selectedIndex = -1;
 
 /**
  * Accepts both legacy tuple shape [ScoreResult, ServerSnapshot] and current
@@ -151,6 +151,7 @@ function ServerPowerViewer({ ns }) {
     return true;
   });
 
+  const sortedFilteredServers = sortArrayAlphabetically(filteredServers);
 
   return e(
     "div", { style: styles.root },
@@ -162,7 +163,7 @@ function ServerPowerViewer({ ns }) {
     e("div", 
         { style: styles.headerCenter },
         e(ServerSummaryPanel, {
-            servers: filteredServers,
+            servers: sortedFilteredServers,
             refreshFn: () => {
                 // manually trigger a refresh of the server data by re-running get-targets
           ns.run(GET_TARGETS_SCRIPT, 1, "--tail", "--manual", String(Date.now()));
@@ -247,3 +248,4 @@ const styles = {
     fontWeight: "bold",
   },
 };
+

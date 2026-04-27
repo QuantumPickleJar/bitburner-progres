@@ -407,30 +407,41 @@ async function dispatchPortQueues(ns, queues, budget) {
                 continue;
             }
 
-            await maybeYield(ns, dispatchCount);
+            // Try this queue at most once per server during this pass.
+            // This preserves reroll behavior but prevents infinite spin when
+            // all candidates in a queue are currently non-launchable.
+            let attempts = 0;
+            const attemptLimit = queue.servers.length;
 
-            const serv = queue.servers[0];
-            if (!serv) {
-                continue;
-            }
+            while (attempts < attemptLimit && budget.remaining > 0 && queue.servers.length > 0) {
+                await maybeYield(ns, dispatchCount);
 
-            const result = await deployServer(ns, serv, queue.portsRequired, budget);
-            dispatchCount += 1;
-
-            if (result.deployed) {
-                // Pop servers only when deployment actually succeeded.
-                queue.servers.shift();
-                madeProgress = true;
-                continue;
-            }
-
-            if (result.reroll && queue.servers.length > 1) {
-                // Move failed candidate to back and immediately retry this queue.
-                const rotated = queue.servers.shift();
-                if (rotated) {
-                    queue.servers.push(rotated);
+                const serv = queue.servers[0];
+                if (!serv) {
+                    break;
                 }
-                i -= 1;
+
+                const result = await deployServer(ns, serv, queue.portsRequired, budget);
+                dispatchCount += 1;
+                attempts += 1;
+
+                if (result.deployed) {
+                    // Pop servers only when deployment actually succeeded.
+                    queue.servers.shift();
+                    madeProgress = true;
+                    break;
+                }
+
+                if (result.reroll && queue.servers.length > 1) {
+                    // Move failed candidate to back and retry this queue.
+                    const rotated = queue.servers.shift();
+                    if (rotated) {
+                        queue.servers.push(rotated);
+                    }
+                    continue;
+                }
+
+                break;
             }
         }
 

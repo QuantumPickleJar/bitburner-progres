@@ -289,7 +289,7 @@ export function snapshotServer(ns, hostname) {
 
   const currentServer = ns.getServer(hostname); 
 
-  ns.tprint(`${currentServer.hostname} has ${currentServer.openPortCount ? currentServer.openPortCount : "no"} ports open.`)
+  ns.print(`${currentServer.hostname} has ${currentServer.openPortCount ? currentServer.openPortCount : "no"} ports open.`)
   // if number of open ports is less than number of ports required...
   return (currentServer.openPortCount ?? 0) < (currentServer.numOpenPortsRequired ?? 0) ? {
     hostname,
