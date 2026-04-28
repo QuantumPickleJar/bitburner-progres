@@ -87,62 +87,64 @@ export async function main(ns) {
   ns.disableLog("ALL");
   ns.print(`▶ IPvGO player starting — opponent: ${opponent}, size: ${boardSize}`);
 
-  // Start (or continue) a game against the chosen opponent
-  ns.go.resetBoardState(opponent, boardSize);
+  // Run continuously: start a new game immediately after each game-over.
+  while (true) {
+    // Start a fresh game against the chosen opponent and board size.
+    ns.go.resetBoardState(opponent, boardSize);
 
-  // ── Game loop ──────────────────────────────────────────────────────────────
-  // We keep looping until the game reports "gameOver".
-  // Each iteration:
-  //   1. Read the board and valid moves
-  //   2. Derive chain/liberty data locally (0 extra GB)
-  //   3. Score every valid move
-  //   4. Play the best move, or pass if nothing scores above zero
-  //   5. Await the opponent's response
+    // ── Game loop ────────────────────────────────────────────────────────────
+    // We keep looping until the game reports "gameOver".
+    // Each iteration:
+    //   1. Read the board and valid moves
+    //   2. Derive chain/liberty data locally (0 extra GB)
+    //   3. Score every valid move
+    //   4. Play the best move, or pass if nothing scores above zero
+    //   5. Await the opponent's response
+    let result = { type: "move" };
 
-  let result = { type: "move" };
+    while (result.type !== "gameOver") {
+      // ── 1. Read state ──────────────────────────────────────────────────────
+      const boardState  = ns.go.getBoardState();          // 4 GB
+      const validGrid   = ns.go.analysis.getValidMoves(); // 8 GB
 
-  while (result.type !== "gameOver") {
-    // ── 1. Read state ────────────────────────────────────────────────────────
-    const boardState  = ns.go.getBoardState();        // 4 GB
-    const validGrid   = ns.go.analysis.getValidMoves(); // 8 GB
+      // ── 2. Derive local data ───────────────────────────────────────────────
+      const board     = parseBoard(boardState);            // 2D char array
+      const size      = board.length;
+      const chains    = computeLocalChains(board, size);   // flood-fill chain IDs
+      const liberties = computeLocalLiberties(chains, board, size); // open-port counts per chain
 
-    // ── 2. Derive local data ─────────────────────────────────────────────────
-    const board     = parseBoard(boardState);          // 2D char array
-    const size      = board.length;
-    const chains    = computeLocalChains(board, size); // flood-fill chain IDs
-    const liberties = computeLocalLiberties(chains, board, size); // open-port counts per chain
+      // Pre-compute eye vitality for both sides — used by scoreMoves and selectBestMove
+      const eyeCounts = computeEyeCounts(board, chains, size, BLACK);
 
-    // Pre-compute eye vitality for both sides — used by scoreMoves and selectBestMove
-    const eyeCounts = computeEyeCounts(board, chains, size, BLACK);
+      // ── 3. Score moves ─────────────────────────────────────────────────────
+      // Pre-compute fillRatio once; shared by scoreMoves and selectBestMove
+      let _f = 0, _t = 0;
+      for (let _x = 0; _x < size; _x++) for (let _y = 0; _y < size; _y++) {
+        if (board[_x][_y] === DEAD) continue; _t++;
+        if (board[_x][_y] !== EMPTY) _f++;
+      }
+      const fillRatio = _t > 0 ? _f / _t : 0;
+      const scored = scoreMoves(validGrid, board, chains, liberties, size, fillRatio, eyeCounts);
 
-    // ── 3. Score moves ───────────────────────────────────────────────────────
-    // Pre-compute fillRatio once; shared by scoreMoves and selectBestMove
-    let _f = 0, _t = 0;
-    for (let _x = 0; _x < size; _x++) for (let _y = 0; _y < size; _y++) {
-      if (board[_x][_y] === DEAD) continue; _t++;
-      if (board[_x][_y] !== EMPTY) _f++;
+      // ── 4. Pick best move ──────────────────────────────────────────────────
+      const best = selectBestMove(scored, fillRatio, chains, eyeCounts);
+
+      // ── 5. Play ────────────────────────────────────────────────────────────
+      if (best) {
+        ns.print(`  ↳ playing (${best.x}, ${best.y})  score=${best.score}`);
+        result = await ns.go.makeMove(best.x, best.y); // 4 GB
+      } else {
+        ns.print("  ↳ passing (no move clears the late-game threshold)");
+        result = await ns.go.passTurn();
+      }
+
+      // Small yield so other scripts keep running smoothly
+      await ns.sleep(200);
     }
-    const fillRatio = _t > 0 ? _f / _t : 0;
-    const scored = scoreMoves(validGrid, board, chains, liberties, size, fillRatio, eyeCounts);
 
-    // ── 4. Pick best move ────────────────────────────────────────────────────
-    const best = selectBestMove(scored, fillRatio, chains, eyeCounts);
-
-    // ── 5. Play ──────────────────────────────────────────────────────────────
-    if (best) {
-      ns.print(`  ↳ playing (${best.x}, ${best.y})  score=${best.score}`);
-      result = await ns.go.makeMove(best.x, best.y); // 4 GB
-    } else {
-      ns.print("  ↳ passing (no move clears the late-game threshold)");
-      result = await ns.go.passTurn();
-    }
-
-    // Small yield so other scripts keep running smoothly
-    await ns.sleep(200);
+    // ── Game over ─────────────────────────────────────────────────────────────
+    await handleGameOver(ns, boardSize);
   }
-
-  // ── Game over ───────────────────────────────────────────────────────────────
-  await handleGameOver(ns, result, boardSize);
 }
 
 // ─── Board parsing ───────────────────────────────────────────────────────────
@@ -1350,10 +1352,9 @@ function floodFillTerritory(board, size) {
  * Logs final scores and win/loss record, then restarts the game.
  *
  * @param {import("NetscriptDefinitions").NS} ns
- * @param {object} result    — the gameOver result object from makeMove/passTurn
  * @param {number} boardSize — board dimension to reuse when restarting
  */
-async function handleGameOver(ns, result, boardSize) {
+async function handleGameOver(ns, boardSize) {
   const state    = ns.go.getGameState();
   const opponent = ns.go.getOpponent();
   const komi     = state.komi;
@@ -1374,9 +1375,9 @@ async function handleGameOver(ns, result, boardSize) {
     ns.tprint(`  Record vs ${opponent}: ${opponentStats.wins}W / ${opponentStats.losses}L  (${winRate}% win rate)`);
   }
 
-  // Short pause so the result is visible before the next game starts
+  // Short pause so the result is visible before the next game starts.
+  // main() immediately starts the next game after this returns.
   await ns.sleep(2000);
-  ns.go.resetBoardState(opponent, /** @type {5|7|9|13} */ (boardSize));
 }
 
 // ─── Tab-completion ───────────────────────────────────────────────────────────

@@ -200,8 +200,8 @@ export async function main(ns) {
       // Report done immediately — workers are running with internal delays
       reportDone(ns, target, instanceTag, slot.batchId, true);
       ns.print("[" + instanceTag + "] Batch " + slot.batchId + " dispatched." +
-               " inflight=" + inflightBatches.length +
-               " peakRam=" + plan.peakRam.toFixed(0) + "GB");
+           " inflight=" + inflightBatches.length +
+           " reservedRam=" + plan.reservedRam.toFixed(0) + "GB");
     } else {
       reportDone(ns, target, instanceTag, slot.batchId, false);
       // Wait for any partially-launched workers before re-prepping
@@ -352,6 +352,7 @@ async function prepTarget(ns, target, execHost, ramLimitGb, pollMs, instanceTag,
  *   weakenGrowThreads: number,
  *   hackFraction: number,
  *   jobs: Array<{name:string, script:string, threads:number, startOffset:number, endOffset:number, ram:number}>,
+ *   reservedRam: number,
  *   peakRam: number,
  *   weakenTime: number
  * }} BatchPlanV2
@@ -457,8 +458,11 @@ function planBatch(ns, target, execHost, ramLimitGb, desiredHack, gapMs, useForm
       { name: "weaken-grow", script: WEAKEN_WORKER,  threads: weakenGrowThreads,   startOffset: 3 * gapMs - weakenTime,   endOffset: 3 * gapMs,  ram: weakenRam * weakenGrowThreads }
     ];
 
+    // Workers are launched immediately and sleep internally, so RAM is
+    // reserved for all jobs at once rather than at overlap-only peaks.
+    var reserved = sumRam(jobs);
     var peak = peakRam(jobs);
-    if (peak > availRam) return null;
+    if (reserved > availRam) return null;
 
     return {
       hackThreads: hackThreads,
@@ -467,6 +471,7 @@ function planBatch(ns, target, execHost, ramLimitGb, desiredHack, gapMs, useForm
       weakenGrowThreads: weakenGrowThreads,
       hackFraction: actualHackFraction,
       jobs: jobs,
+      reservedRam: reserved,
       peakRam: peak,
       weakenTime: weakenTime
     };
@@ -711,6 +716,20 @@ function peakRam(jobs) {
     if (cur > max) max = cur;
   }
   return max;
+}
+
+/**
+ * Calculates total RAM reserved when all jobs are launched immediately.
+ *
+ * @param {Array<{ram:number}>} jobs
+ * @returns {number}
+ */
+function sumRam(jobs) {
+  var total = 0;
+  for (var i = 0; i < jobs.length; i++) {
+    total += Math.max(0, jobs[i].ram);
+  }
+  return total;
 }
 
 /**
