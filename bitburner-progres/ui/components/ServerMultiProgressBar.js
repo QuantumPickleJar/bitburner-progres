@@ -57,7 +57,8 @@ export function ServerMultiProgressBar(props) {
           textAlign: "left",
           whiteSpace: "nowrap",
           overflow: "hidden",
-          textOverflow: "ellipsis"
+          textOverflow: "ellipsis",
+          color: (scoredSnapshot.server.hasRoot ? "green" : "red")
         }
       },
       props.scoredSnapshot.server.hostname
@@ -88,40 +89,6 @@ function composeLayers(...layers) {
 
   return out.join("");
 }
-
-// /** 
-//  * @deprecated
-//  * @param {number} width 
-//  * @param {number} ratio 
-//  * @param {Object} options 
-//  * @param {string} [options.leftChar]
-//  * @param {string} [options.rightChar]
-//  * @param {string} [options.fillChar]
-//  * @param {string} [options.emptyChar]
-//  * @param {number} [options.tickEvery]
-//  * @param {number} [options.tickOffset]
-//  * @param {string} [options.tickChar]
-//  */
-// function createProgressBar(width, ratio, options = {}) { 
-//     const z0 = renderZ0(width, Z0_CHAR);
-
-//     const z1 = renderZ1(width, ratio, {
-//         leftChar: options.leftChar,
-//         rightChar: options.rightChar,
-//         emptyChar: options.emptyChar,
-//         fillChar: options.fillChar
-//     });
-
-//     let z2 = makeBlankLayer(width);
-
-//     z2 = renderZ2Bars(width, {
-//         tickChar: options.tickChar,
-//         tickEvery: options.tickEvery ?? 4,
-//         tickOffset: options.tickOffset ?? 0 
-//     });
-
-//     return composeLayers(z0, z1, z2);
-// }
 
 /**
  * 
@@ -250,14 +217,14 @@ function renderZ1(width, ratio, options = {}) {
  */
 function renderZ2Bars(width, ratio, options = {}) {
   const layer = makeBlankLayer(width);
-  const normalized = clamp01(ratio);
+//   const normalized = clamp01(ratio);
 
   const tickEvery = options.tickEvery ?? 4;
-  const tickOffset = options.tickOffset ?? 0;
+//   const tickOffset = options.tickOffset ?? 0;
   const tickChar = options.tickChar ?? "=";
 
   const innerWidth = width - 2;
-  const filledCells = Math.round(innerWidth * normalized);
+//   const filledCells = Math.round(innerWidth * normalized);
 
   if (width <= 2 || tickEvery <= 0) return layer;
 

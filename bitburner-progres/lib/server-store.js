@@ -3,7 +3,7 @@
 /** @typedef {import("./server-store.types").ServerStoreMeta}  ServerStoreMeta */
 
 
-const DEFAULT_FILE = "./data/home-neighbors.json";
+const DEFAULT_FILE = "/data/home-neighbors.json";
 
 /**
  * @param {import("NetscriptDefinitions").AutocompleteData} data
@@ -28,6 +28,10 @@ export async function main(ns) {
   ns.disableLog("write");
   ns.disableLog("scan");
   ns.disableLog("serverExists");
+  // ns.disableLog("scp");
+  ns.disableLog("hack");
+  ns.disableLog("grow");
+  ns.disableLog("weaken");
   ns.disableLog("hasRootAccess");
   ns.disableLog("getServerMaxRam");
   ns.disableLog("getServerUsedRam");
@@ -35,7 +39,7 @@ export async function main(ns) {
   ns.disableLog("getServerMoneyAvailable");
   ns.disableLog("getServerMinSecurityLevel");
   ns.disableLog("getServerSecurityLevel");
-
+  
   switch (action) {
     case "build": {
       const maxDepth = parseDepthArg(depthArg);
@@ -70,6 +74,7 @@ export async function main(ns) {
 export function readServerStore(ns, file = DEFAULT_FILE) {
   const raw = ns.read(file);
   if (!raw) {
+    ns.print(`ERROR Failed to read servers from ${file}!`);
     return { servers: [], updatedAt: Date.now(), meta: { root: "home", maxDepth: 1 } };
   }
 
@@ -86,6 +91,7 @@ export function readServerStore(ns, file = DEFAULT_FILE) {
       updatedAt: Number(parsed.updatedAt ?? Date.now()),
     };
   } catch {
+    ns.print(`ERROR Failed to read servers!`);
     return { servers: [], updatedAt: Date.now(), meta: { root: "home", maxDepth: 1 } };
   }
 }

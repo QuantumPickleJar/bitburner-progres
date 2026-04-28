@@ -1,53 +1,43 @@
-/** @typedef {import("./../server-store.types.js").ServerStore} ServerStore */
-/** @typedef {import("./../server-store.types.js").ServerSnapshot} ServerSnapshot  */
-/** @typedef {import("./../server-store.types.js").ServerStoreMeta} ServerStoreMeta */
-/** @typedef {import("./../server-store.types.js").ScoreResult} ScoreResult */
-/** @typedef {import("./../server-store.types.js").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
+/** @typedef {import("../../server-store.types.js").ServerStore} ServerStore */
+/** @typedef {import("../../server-store.types.js").ServerSnapshot} ServerSnapshot  */
+/** @typedef {import("../../server-store.types.js").ServerStoreMeta} ServerStoreMeta */
+/** @typedef {import("../../server-store.types.js").ScoreResult} ScoreResult */
+/** @typedef {import("../../server-store.types.js").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
 /** @typedef {{ success: boolean, server: ServerSnapshot }} HackAttemptResult */
 
-import { readServerStore } from "../bitburner-progres/lib/server-store.js";
+import { readServerStore } from "../lib/server-store.js";
 
 /** @param {import("NetscriptDefinitions").NS} ns */
-export async function main(ns) { 
+export async function main(ns) {
+    ns.disableLog("scp");
 
+    ns.disableLog("brutessh");
+    ns.disableLog("ftpcrack");
+    ns.disableLog("relaysmtp");
+    ns.disableLog("sqlinject");
+    ns.disableLog("httpworm");
+    
+    
+    ns.print("Initializing...");
+    
     /** @type {HackAttemptResult[]} */
     const hackedServers = [];
     
     // fetch a security snapshot of everything 
      const store = readServerStore(ns);
+
+     ns.print(`Read ${store.servers.length} servers.`);
      for (const server of store.servers) {
         // prep server with our scripts
+        // ns.print(`Deploying scripts to ${server.hostname}...`);
         deployScripts(server,ns);
 
-        // check what ports are open 
-        
+        // attempt to crack open this server's ports and establish root access
         const serverOpened = openPortsAndNuke(ns, server.hostname, server.portsRequired);
         hackedServers.push({ success: serverOpened, server });
 
-        // switch(server.portsRequired) {
-
-        //     case 0:
-        //         openPortsAndNuke(ns, server.hostname, server.portsRequired); 
-        //         break;
-
-        //     case 1: 
-        //         break;
-
-        //     case 2: 
-        //         break;
-
-        //     case 3: 
-        //         break;
-
-        //     case 4: 
-        //         break;
-
-        //     case 5: 
-        //         break;
-        // }
      }
      printResults(ns, hackedServers);
-
 }
 
 /**
@@ -63,7 +53,6 @@ function printResults(ns, hackedServerResults) {
     }
 }
 
-
  /** 
   * @param {ServerSnapshot} serv
   * @param {import("NetscriptDefinitions").NS} ns
@@ -71,42 +60,16 @@ function printResults(ns, hackedServerResults) {
  function deployScripts(serv, ns) {
      if (getRamLessThan32(serv)) {
          // use the early hack template
-         ns.scp("scripts/early-hack-template.js", serv.hostname);
+         ns.scp("/scripts/early-hack-template.js", serv.hostname);
      } else {
-         ns.scp("./bitburner-progres/controllers/hwgw-batcher-v2.js", serv.hostname);
-         ns.scp("./bitburner-progres/controllers/start-hwgw-v2.js", serv.hostname);
+         ns.scp("/bitburner-progres/controllers/hwgw-batcher-v2.js", serv.hostname);
+         ns.scp("/bitburner-progres/controllers/start-hwgw-v2.js", serv.hostname);
      }
  }
 
-
- 
-
-/** @param {import("../server-store.types.js").ServerSnapshot} server*/
+/** @param {import("../../server-store.types.js").ServerSnapshot} server*/
 function getRamLessThan32(server) { 
     return server.maxRam ? server.maxRam < 32 : false;
-}
-
-/**
- * @param {import("NetscriptDefinitions").NS} ns
- * @param {import("../server-store.types.js").ServerSnapshot} server
- * @returns {number}
- */
-function getPortsRequired(ns, server) {
-    if (Number.isFinite(server?.portsRequired)) {
-        return Number(server.portsRequired);
-    }
-
-    // Backward-compatible fallback for snapshots that use Bitburner's native property names.
-    const fallback = Number((/** @type {any} */ (server))?.numOpenPortsRequired);
-    if (Number.isFinite(fallback)) {
-        return fallback;
-    }
-
-    if (server?.hostname && ns.serverExists(server.hostname)) {
-        return ns.getServerNumPortsRequired(server.hostname);
-    }
-
-    return 0;
 }
 
 /**
@@ -116,6 +79,7 @@ function getPortsRequired(ns, server) {
  * @returns {boolean}
  */
 function openPortsAndNuke(ns, hostname, portsRequired) {
+    ns.print(`Opening ${hostname} behind ${portsRequired} ports...`);
     if (ns.hasRootAccess(hostname)) {
         return true;
     }
@@ -144,11 +108,12 @@ function openPortsAndNuke(ns, hostname, portsRequired) {
     }
 
     if (openedPorts < portsRequired) {
-        ns.print(`WARN cannot root ${hostname}: opened ${openedPorts}/${portsRequired} required ports`);
+        // ns.print(`WARN cannot root ${hostname}: opened ${openedPorts}/${portsRequired} required ports`);
         return false;
     }
 
     ns.nuke(hostname);
+    // ns.print(`${hostname} hacked after opening ${openedPorts}!`);
     return ns.hasRootAccess(hostname);
 }
 

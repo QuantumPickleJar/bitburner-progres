@@ -1,4 +1,4 @@
-/** @typedef {import("../server-store.types").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
+/** @typedef {import("../../server-store.types").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
 
 /**
  * Accept both the current object shape

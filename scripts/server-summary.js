@@ -23,7 +23,7 @@
  */
 
 import { ServerSummaryPanel } from "../bitburner-progres/ui/components/ServerSummaryPanel.js";
-import { sortArrayByServerScore, sortArrayAlphabetically } from "../tools/sortMapByServerScore.js";
+import { sortArrayByServerScore, sortArrayAlphabetically } from "../bitburner-progres/tools/sortMapByServerScore.js";
 const SORTED_SCORED_RESULTS_FILE = "data/sorted-serversnapshot.json";
 const GET_TARGETS_SCRIPT = "tools/get-targets.js";
 

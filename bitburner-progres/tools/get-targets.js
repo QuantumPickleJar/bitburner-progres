@@ -1,12 +1,12 @@
 /** @typedef {import("NetscriptDefinitions").Server} Server */
-/** @typedef {import("../server-store.types.js").ServerStore} ServerStore */
-/** @typedef {import("../server-store.types.js").ServerSnapshot} ServerSnapshot  */
-/** @typedef {import("../server-store.types.js").ServerStoreMeta}  ServerStoreMeta */
+/** @typedef {import("../../server-store.types.js").ServerStore} ServerStore */
+/** @typedef {import("../../server-store.types.js").ServerSnapshot} ServerSnapshot  */
+/** @typedef {import("../../server-store.types.js").ServerStoreMeta}  ServerStoreMeta */
 /** @typedef {[number, ServerSnapshot]} ScoredServerSnapshotTupleOld */
-/** @typedef {import("../server-store.types.js").ScoreResult} ScoreResult */
-/** @typedef {import("../server-store.types.js").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
+/** @typedef {import("../../server-store.types.js").ScoreResult} ScoreResult */
+/** @typedef {import("../../server-store.types.js").ScoredServerSnapshotTuple} ScoredServerSnapshotTuple */
 
-import { readServerStore, refreshAllServerSnapshots } from "../bitburner-progres/lib/server-store";
+import { readServerStore, refreshAllServerSnapshots } from "../lib/server-store";
 import { sortMapByServerScore } from "./sortMapByServerScore";
 
 const DEFAULT_FILE = "data/home-neighbors.json";
@@ -167,7 +167,7 @@ export function openLoggingTail(ns) {
 
 /**
  * @param {import("NetscriptDefinitions").NS} ns 
- * @param {import("../server-store.types").ServerSnapshot} server
+ * @param {import("../../server-store.types").ServerSnapshot} server
  * @returns {ScoreResult} 
  */
 export function computeServerScoreDetails(ns, server) { 
@@ -216,7 +216,7 @@ export function computeServerScoreDetails(ns, server) {
 
 /**
  * @param {import("NetscriptDefinitions").NS} ns 
- * @param {import("../server-store.types").ServerSnapshot} server
+ * @param {import("../../server-store.types").ServerSnapshot} server
  * @return {ScoredServerSnapshotTuple} scored snapshot of the server
  */
 export function scoreTargetServer(ns, server) {
